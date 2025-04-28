@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Основной модуль скрапера Twitter, содержащий функции для инициализации и запуска скрапера
-(Функционал обработки статей удален)
+(Функционал обработки статей удален, структура импортов упрощена)
 """
 
 import os
@@ -26,34 +26,33 @@ logging.basicConfig(
 logger = logging.getLogger('twitter_scraper')
 
 # Настройки
-CHROME_PROFILE_PATH = "/Users/evgeniyyanvarskiy/Library/Application Support/Google/Chrome/Profile 1/"
+CHROME_PROFILE_PATH = "/Users/evgeniyyanvarskiy/Library/Application Support/Google/Chrome/Profile 1/" # Пример пути, измените на свой
 CACHE_DIR = "twitter_cache"
-# ARTICLE_CACHE_DIR = "twitter_article_cache" # Удалено
 LINKS_CACHE_DIR = "twitter_links_cache"
 HTML_CACHE_DIR = "twitter_html_cache"  # Директория для временных HTML
 
 # Создаем директории
-# for directory in [CACHE_DIR, ARTICLE_CACHE_DIR, LINKS_CACHE_DIR, HTML_CACHE_DIR]: # Обновлено
 for directory in [CACHE_DIR, LINKS_CACHE_DIR, HTML_CACHE_DIR]:
     os.makedirs(directory, exist_ok=True)
     logger.info(f"Создана директория: {directory}")
 
 # Настройки подключения к MySQL
 MYSQL_CONFIG = {
-    'host': '217.154.19.224',
+    'host': '217.154.19.224', # Пример, измените на свой
     'database': 'twitter_data',
-    'user': 'elcrypto',
-    'password': 'LohNeMamont@!21',
+    'user': 'elcrypto', # Пример, измените на свой
+    'password': 'LohNeMamont@!21', # Пример, измените на свой
     'port': 3306
 }
 
 
 def initialize_dependencies():
     """
-    Импортирует необходимые модули и проверяет их наличие
-    Возвращает словарь с импортированными модулями
+    Импортирует необходимые модули и проверяет их наличие.
+    Возвращает словарь с импортированными функциями.
     """
     dependencies = {}
+    missing_modules = []
 
     try:
         # Импортируем базовые утилиты
@@ -61,48 +60,90 @@ def initialize_dependencies():
             debug_print, initialize_mysql, save_user_to_db, save_tweet_to_db,
             parse_twitter_date, filter_recent_tweets, format_time_ago,
             initialize_browser, manual_auth_with_prompt,
+            extract_tweet_stats, extract_retweet_info # Базовая функция ретвитов
+        )
+        # Добавляем базовые утилиты в словарь
+        base_utils = [
+            debug_print, initialize_mysql, save_user_to_db, save_tweet_to_db,
+            parse_twitter_date, filter_recent_tweets, format_time_ago,
+            initialize_browser, manual_auth_with_prompt,
             extract_tweet_stats, extract_retweet_info
-        )
+        ]
+        for func in base_utils:
+            dependencies[func.__name__] = func
+        logger.info("Базовые утилиты (twitter_scraper_utils) импортированы.")
+    except ImportError as e:
+        logger.error(f"Ошибка импорта базовых утилит: {e}")
+        missing_modules.append("twitter_scraper_utils")
 
-        # Добавляем в словарь
-        for func_name, func in locals().items():
-            if callable(func) and not func_name.startswith('_'):
-                dependencies[func_name] = func
-
-        # Импортируем расширенные утилиты
-        from twitter_scraper_enhanced_utils import (
-            # process_article_from_tweet, # Удалено
+    try:
+        # Импортируем утилиты для ссылок и длинных твитов
+        from twitter_scraper_links_utils import (
+            extract_all_links_from_tweet, save_links_to_db,
             is_tweet_truncated, get_full_tweet_text,
-            extract_all_links_from_tweet, save_links_to_db, extract_retweet_info_enhanced
+            extract_full_tweet_text_from_html
         )
+        link_utils = [
+             extract_all_links_from_tweet, save_links_to_db,
+            is_tweet_truncated, get_full_tweet_text,
+            extract_full_tweet_text_from_html
+        ]
+        for func in link_utils:
+             dependencies[func.__name__] = func
+        logger.info("Утилиты для ссылок (twitter_scraper_links_utils) импортированы.")
+    except ImportError as e:
+        logger.error(f"Ошибка импорта утилит для ссылок: {e}")
+        missing_modules.append("twitter_scraper_links_utils")
 
-        # Добавляем в словарь
-        for func_name, func in locals().items():
-            if callable(func) and not func_name.startswith('_') and func_name not in dependencies: # Проверяем, что еще не добавлено
-                 # Исключаем удаленные функции
-                if func_name != 'process_article_from_tweet':
-                    dependencies[func_name] = func
+    try:
+        # Импортируем утилиты для ретвитов (расширенная версия)
+        from twitter_scraper_retweet_utils import (
+            extract_retweet_info_enhanced, # Расширенная функция
+            get_author_info
+        )
+        # Добавляем или перезаписываем функцию извлечения информации о ретвите
+        dependencies['extract_retweet_info_enhanced'] = extract_retweet_info_enhanced
+        # Добавляем функцию получения информации об авторе
+        dependencies['get_author_info'] = get_author_info
+        logger.info("Утилиты для ретвитов (twitter_scraper_retweet_utils) импортированы.")
+    except ImportError as e:
+        logger.error(f"Ошибка импорта утилит для ретвитов: {e}")
+        missing_modules.append("twitter_scraper_retweet_utils")
 
+    try:
         # Импортируем утилиты для твитов
         from twitter_scraper_tweets import get_tweets_with_selenium
         dependencies['get_tweets_with_selenium'] = get_tweets_with_selenium
+        logger.info("Утилиты для твитов (twitter_scraper_tweets) импортированы.")
+    except ImportError as e:
+        logger.error(f"Ошибка импорта утилит для твитов: {e}")
+        missing_modules.append("twitter_scraper_tweets")
 
+    try:
         # Импортируем утилиты для статистики
         from twitter_scraper_stats import (
             generate_tweet_statistics, generate_database_statistics,
             display_results_summary
         )
-        dependencies['generate_tweet_statistics'] = generate_tweet_statistics
-        dependencies['generate_database_statistics'] = generate_database_statistics
-        dependencies['display_results_summary'] = display_results_summary
-
-        logger.info("Импорт всех зависимостей завершен успешно (без функционала статей)")
-        return dependencies
-
+        stat_utils = [
+            generate_tweet_statistics, generate_database_statistics,
+            display_results_summary
+        ]
+        for func in stat_utils:
+             dependencies[func.__name__] = func
+        logger.info("Утилиты для статистики (twitter_scraper_stats) импортированы.")
     except ImportError as e:
-        logger.error(f"ОШИБКА: Не удалось импортировать функции: {e}")
-        logger.error("Убедитесь, что все необходимые файлы находятся в той же директории")
+        logger.error(f"Ошибка импорта утилит для статистики: {e}")
+        missing_modules.append("twitter_scraper_stats")
+
+    # Проверяем, все ли модули загружены
+    if missing_modules:
+        logger.critical(f"ОШИБКА: Не удалось импортировать модули: {', '.join(missing_modules)}")
+        logger.critical("Убедитесь, что все необходимые файлы (.py) находятся в той же директории, что и twitter_scraper_core.py")
         sys.exit(1)
+
+    logger.info("Импорт всех зависимостей завершен успешно.")
+    return dependencies
 
 
 def load_accounts_from_file(filename="influencer_twitter.txt"):
@@ -151,12 +192,15 @@ def main():
     deps = initialize_dependencies()
 
     # Напоминание о необходимости заполнить путь к профилю Chrome
-    if not CHROME_PROFILE_PATH:
-        print("ПРИМЕЧАНИЕ: Вы не указали путь к профилю Chrome. Будет использован временный профиль.")
-        logger.warning("Путь к профилю Chrome не указан, используется временный профиль")
+    if not CHROME_PROFILE_PATH or not os.path.exists(CHROME_PROFILE_PATH):
+        print(f"ПРЕДУПРЕЖДЕНИЕ: Путь к профилю Chrome не указан или неверен: {CHROME_PROFILE_PATH}")
+        print("Будет использован временный профиль Selenium.")
+        logger.warning(f"Путь к профилю Chrome не указан или неверен ({CHROME_PROFILE_PATH}), используется временный профиль")
+        actual_profile_path = None # Используем временный профиль
     else:
         print(f"Используется профиль Chrome: {CHROME_PROFILE_PATH}")
         logger.info(f"Используется профиль Chrome: {CHROME_PROFILE_PATH}")
+        actual_profile_path = CHROME_PROFILE_PATH
 
     # Подключаемся к базе данных
     print("\n--- Подключение к MySQL ---")
@@ -176,9 +220,8 @@ def main():
     # Параметры для настройки
     HOURS_FILTER = 24  # Фильтр по времени публикации (в часах)
     CACHE_DURATION = 1  # Срок действия кэша (в часах)
-    MAX_TWEETS = 10  # Увеличенное максимальное количество твитов для каждого аккаунта
-    FORCE_REFRESH = True  # Принудительное обновление данных
-    # EXTRACT_ARTICLES = False # Удалено - функционал статей полностью убран
+    MAX_TWEETS = 10  # Максимальное количество твитов для каждого аккаунта
+    FORCE_REFRESH = False  # Принудительное обновление данных (True для игнорирования кэша)
     EXTRACT_FULL_TWEETS = True  # Извлекать полный текст длинных твитов
     EXTRACT_LINKS = True  # Извлекать все ссылки из твитов
 
@@ -187,37 +230,38 @@ def main():
 
     # Если файл не найден или пуст, используем дефолтный список
     if not accounts_to_track:
-        print("Используем список аккаунтов по умолчанию")
-        logger.info("Используем список аккаунтов по умолчанию")
+        print("Файл influencer_twitter.txt не найден или пуст. Используем список аккаунтов по умолчанию.")
+        logger.warning("Файл influencer_twitter.txt не найден или пуст. Используем список аккаунтов по умолчанию.")
         accounts_to_track = [
-            "Defi0xJeff",
-            "elonmusk",
-            "OpenAI"
+            "Defi0xJeff", # Пример
+            "elonmusk",   # Пример
+            "OpenAI"      # Пример
         ]
 
     print(f"\n--- Основные параметры ---")
     print(f"Период твитов: последние {HOURS_FILTER} часа")
     print(f"Срок действия кэша: {CACHE_DURATION} час")
-    print(f"Максимальное количество твитов: {MAX_TWEETS}")
-    print(f"Принудительное обновление: {'ДА' if FORCE_REFRESH else 'НЕТ'}")
-    # print(f"Извлечение полных статей: {'ДА' if EXTRACT_ARTICLES else 'НЕТ'}") # Удалено
+    print(f"Максимальное количество твитов на аккаунт: {MAX_TWEETS}")
+    print(f"Принудительное обновление (игнор. кэш): {'ДА' if FORCE_REFRESH else 'НЕТ'}")
     print(f"Извлечение полных твитов: {'ДА' if EXTRACT_FULL_TWEETS else 'НЕТ'}")
     print(f"Извлечение всех ссылок: {'ДА' if EXTRACT_LINKS else 'НЕТ'}")
-    print(f"Аккаунты для отслеживания: {', '.join('@' + account for account in accounts_to_track)}")
+    print(f"Аккаунты для отслеживания ({len(accounts_to_track)}): {', '.join('@' + account for account in accounts_to_track)}")
 
-    # logger.info(f"Параметры: период={HOURS_FILTER}ч, кэш={CACHE_DURATION}ч, макс.твитов={MAX_TWEETS}, " +
-    #             f"обновление={FORCE_REFRESH}, статьи={EXTRACT_ARTICLES}, полные твиты={EXTRACT_FULL_TWEETS}, " +
-    #             f"ссылки={EXTRACT_LINKS}, аккаунтов={len(accounts_to_track)}") # Обновлено
     logger.info(f"Параметры: период={HOURS_FILTER}ч, кэш={CACHE_DURATION}ч, макс.твитов={MAX_TWEETS}, " +
                 f"обновление={FORCE_REFRESH}, полные твиты={EXTRACT_FULL_TWEETS}, " +
                 f"ссылки={EXTRACT_LINKS}, аккаунтов={len(accounts_to_track)}")
 
     # Инициализируем браузер
     print(f"\n--- Инициализация браузера Chrome ---")
-    driver = deps['initialize_browser'](CHROME_PROFILE_PATH)
+    # Передаем actual_profile_path, который может быть None
+    driver = deps['initialize_browser'](actual_profile_path)
     if not driver:
         print("Не удалось инициализировать браузер. Завершение работы.")
         logger.error("Не удалось инициализировать браузер. Завершение работы.")
+        # Закрываем соединение с БД, если оно было открыто
+        if db_connection and hasattr(db_connection, 'is_connected') and db_connection.is_connected():
+            db_connection.close()
+            logger.info("Соединение с базой данных закрыто при ошибке инициализации браузера.")
         return
     else:
         print("Браузер Chrome успешно инициализирован")
@@ -226,28 +270,38 @@ def main():
     try:
         # Сначала выполняем ручную авторизацию с ожиданием нажатия Enter
         print("\n--- Авторизация в Twitter ---")
-        auth_result = deps['manual_auth_with_prompt'](driver)
-        print(f"Результат авторизации: {'УСПЕШНО' if auth_result else 'НЕ УДАЛОСЬ ПОДТВЕРДИТЬ'}")
-        logger.info(f"Результат авторизации: {'успешно' if auth_result else 'не подтверждено'}")
+        # Проверяем, нужна ли авторизация (например, если используется временный профиль)
+        # В реальном сценарии здесь может быть более сложная логика проверки сессии
+        auth_needed = not actual_profile_path # Пример: считаем, что авторизация нужна, если нет профиля
+        auth_result = True # По умолчанию считаем успешной, если не требуется
+        if auth_needed:
+             auth_result = deps['manual_auth_with_prompt'](driver)
+             print(f"Результат ручной авторизации: {'УСПЕШНО' if auth_result else 'НЕ УДАЛОСЬ ПОДТВЕРДИТЬ'}")
+             logger.info(f"Результат ручной авторизации: {'успешно' if auth_result else 'не подтверждено'}")
+        else:
+            print("Используется профиль Chrome, предполагается наличие активной сессии.")
+            logger.info("Используется профиль Chrome, ручная авторизация пропущена.")
+
 
         all_results = []
+        processed_accounts = 0
 
         # Обрабатываем каждый аккаунт
         for username in accounts_to_track:
-            print(f"\n=== Обработка аккаунта @{username} ===")
+            processed_accounts += 1
+            print(f"\n=== Обработка аккаунта @{username} ({processed_accounts}/{len(accounts_to_track)}) ===")
             logger.info(f"Начало обработки аккаунта @{username}")
 
             # Получаем твиты пользователя
             user_data = deps['get_tweets_with_selenium'](
-                username,
-                driver,
-                db_connection,
+                username=username,
+                driver=driver,
+                db_connection=db_connection,
                 max_tweets=MAX_TWEETS,
-                use_cache=True,
+                use_cache=(not FORCE_REFRESH), # Используем кэш, если не включено принуд. обновление
                 cache_duration_hours=CACHE_DURATION,
                 time_filter_hours=HOURS_FILTER,
-                force_refresh=FORCE_REFRESH,
-                # extract_articles=EXTRACT_ARTICLES, # Удалено
+                force_refresh=FORCE_REFRESH, # Передаем флаг дальше
                 extract_full_tweets=EXTRACT_FULL_TWEETS,
                 extract_links=EXTRACT_LINKS,
                 dependencies=deps,  # Передаем словарь с функциями
@@ -255,56 +309,79 @@ def main():
             )
 
             # Проверяем, что результат содержит твиты
-            has_content = (user_data.get("tweets", []))
-            if has_content:
+            if user_data and user_data.get("tweets"): # Добавлена проверка user_data
                 all_results.append(user_data)
-                print(f"Найдено {len(user_data['tweets'])} твитов от @{username}")
-                logger.info(f"Найдено {len(user_data['tweets'])} твитов от @{username}")
-            else:
-                print(f"Нет твитов от @{username} за последние {HOURS_FILTER} часа")
-                logger.info(f"Нет твитов от @{username} за последние {HOURS_FILTER} часа")
+                print(f"Найдено {len(user_data['tweets'])} свежих твитов от @{username}")
+                logger.info(f"Найдено {len(user_data['tweets'])} свежих твитов от @{username}")
+            elif user_data: # Если user_data есть, но нет свежих твитов
+                print(f"Нет свежих твитов от @{username} за последние {HOURS_FILTER} часа (или достигнут лимит).")
+                logger.info(f"Нет свежих твитов от @{username} за последние {HOURS_FILTER} часа (или достигнут лимит).")
+            else: # Если user_data == None (ошибка при обработке)
+                 print(f"Не удалось получить данные для @{username}.")
+                 logger.error(f"Не удалось получить данные для @{username}.")
+
 
             print(f"=== Завершена обработка @{username} ===\n")
             logger.info(f"Завершена обработка @{username}")
+            # Небольшая пауза между обработкой аккаунтов
+            time.sleep(2)
 
         # Вывод результатов
-        print("\n===== РЕЗУЛЬТАТЫ =====\n")
-        logger.info("Формирование результатов")
+        print("\n===== ИТОГОВЫЕ РЕЗУЛЬТАТЫ =====\n")
+        logger.info("Формирование итоговых результатов")
 
         if not all_results:
-            print(f"Не найдено твитов за последние {HOURS_FILTER} часа от отслеживаемых аккаунтов.")
-            logger.warning(f"Не найдено твитов за последние {HOURS_FILTER} часа от отслеживаемых аккаунтов.")
-            return
+            print(f"Не найдено свежих твитов за последние {HOURS_FILTER} часа ни у одного из отслеживаемых аккаунтов.")
+            logger.warning(f"Не найдено свежих твитов за последние {HOURS_FILTER} часа ни у одного из отслеживаемых аккаунтов.")
+        else:
+            # Отображаем результаты
+            deps['display_results_summary'](all_results, HOURS_FILTER)
 
-        # Отображаем результаты
-        deps['display_results_summary'](all_results, HOURS_FILTER)
+            # Генерируем общую статистику
+            total_stats = deps['generate_tweet_statistics'](all_results)
+            print("\n--- Общая статистика по собранным твитам ---")
+            for key, value in total_stats.items():
+                 # Простое форматирование ключей для вывода
+                 label = key.replace('_', ' ').capitalize()
+                 print(f"- {label}: {value}")
+            logger.info(f"Общая статистика: {total_stats}")
 
-        # Генерируем статистику
-        stats = deps['generate_tweet_statistics'](all_results)
 
         # Если есть подключение к БД, получаем статистику базы данных
         if db_connection:
             db_stats = deps['generate_database_statistics'](db_connection)
+            if db_stats: # Проверяем, что статистика получена
+                print("\n--- Информация о базе данных ---")
+                for category, count in db_stats.items():
+                    print(f"- {category}: {count}")
+                logger.info(f"Статистика БД: {db_stats}")
+            else:
+                logger.warning("Не удалось получить статистику базы данных.")
 
-            # Выводим статистику базы данных
-            print("\n--- Информация о базе данных ---")
-            for category, count in db_stats.items():
-                print(f"- {category}: {count}")
-
+    except Exception as e:
+        # Логируем критическую ошибку в основном цикле
+        logger.critical(f"Критическая ошибка в основном цикле: {e}", exc_info=True)
+        print(f"Произошла критическая ошибка: {e}")
     finally:
         # Закрываем браузер и соединение с базой данных
         print("\n--- Завершение работы ---")
         logger.info("Завершение работы скрапера")
 
-        if driver:
-            driver.quit()
-            print("Браузер закрыт")
-            logger.info("Браузер закрыт")
+        if 'driver' in locals() and driver:
+            try:
+                driver.quit()
+                print("Браузер закрыт")
+                logger.info("Браузер закрыт")
+            except Exception as e:
+                logger.error(f"Ошибка при закрытии браузера: {e}")
 
         if db_connection and hasattr(db_connection, 'is_connected') and db_connection.is_connected():
-            db_connection.close()
-            print("Соединение с базой данных закрыто")
-            logger.info("Соединение с базой данных закрыто")
+            try:
+                db_connection.close()
+                print("Соединение с базой данных закрыто")
+                logger.info("Соединение с базой данных закрыто")
+            except Exception as e:
+                logger.error(f"Ошибка при закрытии соединения с БД: {e}")
 
         print("\n=== СКРИПТ ЗАВЕРШИЛ РАБОТУ ===")
         logger.info("СКРИПТ ЗАВЕРШИЛ РАБОТУ")
