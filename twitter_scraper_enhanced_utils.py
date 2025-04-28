@@ -3,6 +3,7 @@
 """
 Основной модуль с улучшенными утилитами для парсера Twitter.
 Импортирует функции из специализированных модулей и предоставляет единый интерфейс.
+(Функционал обработки статей полностью удален)
 """
 
 import os
@@ -19,8 +20,7 @@ logger = logging.getLogger('twitter_scraper')
 # Проверяем наличие необходимых директорий
 required_dirs = [
     "twitter_cache",
-    "twitter_images",
-    "twitter_article_cache",
+    # "twitter_article_cache", # Удалено
     "twitter_links_cache",
     "twitter_html_cache"
 ]
@@ -63,45 +63,8 @@ except ImportError as e:
         logger.warning("Используется заглушка get_full_tweet_text")
         return ""
 
-# Импорт функций для работы со статьями
-try:
-    from twitter_scraper_article_utils import (
-        process_article_from_tweet,
-        extract_article_urls_from_tweet,
-        parse_full_article,
-        save_article_to_db,
-        is_article_url
-    )
-
-    logger.info("Импортированы функции для работы со статьями")
-except ImportError as e:
-    logger.error(f"Ошибка при импорте функций для работы со статьями: {e}")
-
-
-    # Заглушки для функций
-    def process_article_from_tweet(driver, tweet_element, tweet_db_id, username, db_connection=None, use_cache=True):
-        logger.warning("Используется заглушка process_article_from_tweet")
-        return None
-
-
-    def extract_article_urls_from_tweet(tweet_element):
-        logger.warning("Используется заглушка extract_article_urls_from_tweet")
-        return []
-
-
-    def parse_full_article(driver, article_url, username, cache_file=None):
-        logger.warning("Используется заглушка parse_full_article")
-        return {"url": article_url, "title": "", "content": ""}
-
-
-    def save_article_to_db(connection, tweet_id, article_data):
-        logger.warning("Используется заглушка save_article_to_db")
-        return None
-
-
-    def is_article_url(url, extended_check=True):
-        logger.warning("Используется заглушка is_article_url")
-        return False
+# Импорт функций для работы со статьями - Полностью Удалено
+# ... (весь блок try/except и заглушки удалены) ...
 
 # Импорт функций для работы с ретвитами
 try:
@@ -132,4 +95,9 @@ except ImportError as e:
         return {"username": None, "display_name": None, "verified": False}
 
 # Логируем успешную инициализацию
-logger.info("Модуль twitter_scraper_enhanced_utils инициализирован успешно")
+logger.info("Модуль twitter_scraper_enhanced_utils инициализирован успешно (без функционала статей)")
+
+# Заглушка для process_article_from_tweet, если она где-то еще вызывается (хотя не должна)
+def process_article_from_tweet(*args, **kwargs):
+    logger.debug("Вызвана заглушка process_article_from_tweet (функционал статей удален).")
+    return None

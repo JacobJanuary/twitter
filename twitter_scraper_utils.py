@@ -24,9 +24,9 @@ DEBUG = True
 
 # Директории для хранения данных
 CACHE_DIR = "twitter_cache"
-IMAGES_DIR = "twitter_images"
+# IMAGES_DIR = "twitter_images" # Удалено
 os.makedirs(CACHE_DIR, exist_ok=True)
-os.makedirs(IMAGES_DIR, exist_ok=True)
+# os.makedirs(IMAGES_DIR, exist_ok=True) # Удалено
 
 
 def debug_print(*args, **kwargs):
@@ -74,22 +74,22 @@ def initialize_mysql(config):
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
             """)
 
-            # Создаем таблицу для изображений
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS images (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                tweet_id INT,
-                image_url VARCHAR(1024),
-                local_path VARCHAR(1024),
-                image_hash VARCHAR(32),
-                FOREIGN KEY (tweet_id) REFERENCES tweets(id) ON DELETE CASCADE,
-                INDEX idx_tweet_id (tweet_id),
-                INDEX idx_image_hash (image_hash)
-            ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-            """)
+            # Создаем таблицу для изображений - Удалено
+            # cursor.execute("""
+            # CREATE TABLE IF NOT EXISTS images (
+            #     id INT AUTO_INCREMENT PRIMARY KEY,
+            #     tweet_id INT,
+            #     image_url VARCHAR(1024),
+            #     local_path VARCHAR(1024),
+            #     image_hash VARCHAR(32),
+            #     FOREIGN KEY (tweet_id) REFERENCES tweets(id) ON DELETE CASCADE,
+            #     INDEX idx_tweet_id (tweet_id),
+            #     INDEX idx_image_hash (image_hash)
+            # ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            # """)
 
             connection.commit()
-            debug_print("База данных успешно инициализирована")
+            debug_print("База данных успешно инициализирована (без таблицы изображений)")
             return connection
 
     except Error as e:
@@ -143,7 +143,7 @@ def save_tweet_to_db(connection, user_id, tweet_data):
             tweet_db_id = result[0]
             # Обновляем статистику
             cursor.execute("""
-                UPDATE tweets 
+                UPDATE tweets
                 SET likes = %s, retweets = %s, replies = %s
                 WHERE id = %s
                 """,
@@ -157,7 +157,7 @@ def save_tweet_to_db(connection, user_id, tweet_data):
             created_at_str = created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else None
 
             cursor.execute("""
-                INSERT INTO tweets 
+                INSERT INTO tweets
                 (tweet_id, user_id, tweet_text, created_at, url, likes, retweets, replies, is_retweet, original_author)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
@@ -176,9 +176,9 @@ def save_tweet_to_db(connection, user_id, tweet_data):
 
         connection.commit()
 
-        # Сохраняем изображения
-        for image_path in tweet_data.get("images", []):
-            save_image_to_db(connection, tweet_db_id, image_path)
+        # Сохраняем изображения - Удалено
+        # for image_path in tweet_data.get("images", []):
+        #     save_image_to_db(connection, tweet_db_id, image_path)
 
         return tweet_db_id
 
@@ -187,39 +187,10 @@ def save_tweet_to_db(connection, user_id, tweet_data):
         return None
 
 
-def save_image_to_db(connection, tweet_db_id, image_path, image_url=None):
-    """Сохраняет информацию об изображении в базу данных"""
-    try:
-        if not image_path or not os.path.exists(image_path):
-            return None
-
-        cursor = connection.cursor()
-
-        # Получаем хеш файла из имени (оно уже создано на основе хеша URL)
-        image_filename = os.path.basename(image_path)
-        image_hash = os.path.splitext(image_filename)[0]  # Убираем расширение
-
-        # Проверяем, существует ли изображение в базе
-        cursor.execute("SELECT id FROM images WHERE image_hash = %s AND tweet_id = %s",
-                       (image_hash, tweet_db_id))
-        result = cursor.fetchone()
-
-        if not result:
-            # Добавляем новое изображение
-            cursor.execute("""
-                INSERT INTO images (tweet_id, image_url, local_path, image_hash)
-                VALUES (%s, %s, %s, %s)
-                """,
-                           (tweet_db_id, image_url or "", image_path, image_hash))
-
-            connection.commit()
-            return cursor.lastrowid
-
-        return result[0]  # Возвращаем ID существующего изображения
-
-    except Error as e:
-        print(f"Ошибка при сохранении изображения: {e}")
-        return None
+# Функция save_image_to_db удалена
+# def save_image_to_db(connection, tweet_db_id, image_path, image_url=None):
+#     """Сохраняет информацию об изображении в базу данных"""
+#     ...
 
 
 def parse_twitter_date(date_str):
@@ -414,138 +385,16 @@ def manual_auth_with_prompt(driver):
         return False
 
 
-def download_image(url, username):
-    """Скачивает изображение и сохраняет его в папку с изображениями"""
-    try:
-        if not url or 'http' not in url:
-            print(f"Недопустимый URL изображения: {url}")
-            return None
-
-        # Создаем директорию для каждого пользователя
-        user_image_dir = os.path.join(IMAGES_DIR, username)
-        os.makedirs(user_image_dir, exist_ok=True)
-
-        # Генерируем имя файла на основе URL
-        url_hash = hashlib.md5(url.encode()).hexdigest()
-        extension = os.path.splitext(urllib.parse.urlparse(url).path)[1]
-        if not extension or len(extension) <= 1:
-            extension = '.jpg'  # По умолчанию
-
-        filename = f"{url_hash}{extension}"
-        filepath = os.path.join(user_image_dir, filename)
-
-        # Если файл уже существует, просто возвращаем путь
-        if os.path.exists(filepath):
-            print(f"Изображение уже существует: {filepath}")
-            return filepath
-
-        # Скачиваем изображение
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            'Referer': 'https://twitter.com/'
-        }
-
-        print(f"Скачивание изображения: {url}")
-        response = requests.get(url, headers=headers, stream=True, timeout=30)
-        response.raise_for_status()
-
-        # Проверяем, что это действительно изображение
-        content_type = response.headers.get('Content-Type', '')
-        if not content_type.startswith('image/'):
-            print(f"Получен не-изображения контент типа: {content_type}")
-            return None
-
-        # Сохраняем изображение
-        with open(filepath, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-
-        print(f"Скачано изображение: {filepath}")
-        return filepath
-    except Exception as e:
-        print(f"Ошибка при скачивании изображения {url}: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+# Функция download_image удалена
+# def download_image(url, username):
+#     """Скачивает изображение и сохраняет его в папку с изображениями"""
+#     ...
 
 
-def extract_images_from_tweet(tweet_element, username):
-    """Извлекает изображения из твита и скачивает их"""
-    image_paths = []
-
-    try:
-        # Метод 1: Стандартный селектор для изображений
-        img_elements = tweet_element.find_elements(By.CSS_SELECTOR, 'img[alt="Image"]')
-        print(f"Найдено {len(img_elements)} изображений через стандартный селектор")
-
-        # Метод 2: Альтернативный селектор для медиа-контента
-        if not img_elements:
-            print("Пробуем альтернативный метод поиска изображений...")
-            media_elements = tweet_element.find_elements(By.CSS_SELECTOR,
-                                                         'div[data-testid="tweetPhoto"], div[aria-label="Image"]')
-            for media in media_elements:
-                # Ищем все img внутри
-                img_elements.extend(media.find_elements(By.TAG_NAME, 'img'))
-            print(f"Найдено {len(img_elements)} изображений через альтернативные селекторы")
-
-        # Метод 3: Поиск по аттрибутам src, содержащим pbs.twimg.com/media
-        if not img_elements:
-            print("Пробуем поиск по атрибуту src...")
-            all_images = tweet_element.find_elements(By.TAG_NAME, 'img')
-            img_elements = [img for img in all_images if
-                            img.get_attribute('src') and 'pbs.twimg.com/media' in img.get_attribute('src')]
-            print(f"Найдено {len(img_elements)} изображений по атрибуту src")
-
-        # Обработка найденных изображений
-        for img in img_elements:
-            try:
-                src = img.get_attribute('src')
-
-                # Проверяем, является ли это настоящим изображением, а не заглушкой
-                if src and ('https://' in src) and (
-                        'pbs.twimg.com/media' in src or
-                        'pbs.twimg.com/card_img' in src or
-                        'pbs.twimg.com/ext_tw_video_thumb' in src
-                ):
-                    # Получаем изображение в максимальном качестве (заменяем параметры в URL)
-                    original_src = src
-
-                    # Заменяем параметры для получения оригинального изображения
-                    if '?format=' in src:
-                        base_url = src.split('?')[0]
-                        src = f"{base_url}?format=jpg&name=orig"
-
-                    # Еще один вариант: название формата в URL
-                    if 'format=jpg' not in src and 'format=png' not in src and 'format=webp' not in src:
-                        # Если URL уже содержит параметры
-                        if '?' in src:
-                            src = f"{src}&format=jpg&name=orig"
-                        else:
-                            src = f"{src}?format=jpg&name=orig"
-
-                    print(f"Обрабатываем изображение: {src}")
-
-                    # Скачиваем изображение и получаем путь
-                    image_path = download_image(src, username)
-                    if image_path:
-                        image_paths.append(image_path)
-                        print(f"Успешно сохранено изображение: {image_path}")
-                    else:
-                        # Если не удалось скачать оригинал, пробуем исходный URL
-                        if original_src != src:
-                            print(f"Пробуем скачать по исходному URL: {original_src}")
-                            image_path = download_image(original_src, username)
-                            if image_path:
-                                image_paths.append(image_path)
-                                print(f"Успешно сохранено изображение по исходному URL: {image_path}")
-            except Exception as e:
-                print(f"Ошибка при извлечении отдельного изображения: {e}")
-    except Exception as e:
-        print(f"Ошибка при извлечении изображений: {e}")
-
-    print(f"Всего извлечено изображений: {len(image_paths)}")
-    return image_paths
+# Функция extract_images_from_tweet удалена
+# def extract_images_from_tweet(tweet_element, username):
+#     """Извлекает изображения из твита и скачивает их"""
+#     ...
 
 
 def extract_retweet_info(tweet_element):

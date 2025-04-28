@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Основной модуль скрапера Twitter, содержащий функции для инициализации и запуска скрапера
+(Функционал обработки статей удален)
 """
 
 import os
@@ -27,13 +28,13 @@ logger = logging.getLogger('twitter_scraper')
 # Настройки
 CHROME_PROFILE_PATH = "/Users/evgeniyyanvarskiy/Library/Application Support/Google/Chrome/Profile 1/"
 CACHE_DIR = "twitter_cache"
-IMAGES_DIR = "twitter_images"
-ARTICLE_CACHE_DIR = "twitter_article_cache"
+# ARTICLE_CACHE_DIR = "twitter_article_cache" # Удалено
 LINKS_CACHE_DIR = "twitter_links_cache"
 HTML_CACHE_DIR = "twitter_html_cache"  # Директория для временных HTML
 
 # Создаем директории
-for directory in [CACHE_DIR, IMAGES_DIR, ARTICLE_CACHE_DIR, LINKS_CACHE_DIR, HTML_CACHE_DIR]:
+# for directory in [CACHE_DIR, ARTICLE_CACHE_DIR, LINKS_CACHE_DIR, HTML_CACHE_DIR]: # Обновлено
+for directory in [CACHE_DIR, LINKS_CACHE_DIR, HTML_CACHE_DIR]:
     os.makedirs(directory, exist_ok=True)
     logger.info(f"Создана директория: {directory}")
 
@@ -59,8 +60,8 @@ def initialize_dependencies():
         from twitter_scraper_utils import (
             debug_print, initialize_mysql, save_user_to_db, save_tweet_to_db,
             parse_twitter_date, filter_recent_tweets, format_time_ago,
-            initialize_browser, manual_auth_with_prompt, download_image,
-            extract_tweet_stats, extract_images_from_tweet, extract_retweet_info
+            initialize_browser, manual_auth_with_prompt,
+            extract_tweet_stats, extract_retweet_info
         )
 
         # Добавляем в словарь
@@ -70,14 +71,17 @@ def initialize_dependencies():
 
         # Импортируем расширенные утилиты
         from twitter_scraper_enhanced_utils import (
-            process_article_from_tweet, is_tweet_truncated, get_full_tweet_text,
+            # process_article_from_tweet, # Удалено
+            is_tweet_truncated, get_full_tweet_text,
             extract_all_links_from_tweet, save_links_to_db, extract_retweet_info_enhanced
         )
 
         # Добавляем в словарь
         for func_name, func in locals().items():
-            if callable(func) and not func_name.startswith('_'):
-                dependencies[func_name] = func
+            if callable(func) and not func_name.startswith('_') and func_name not in dependencies: # Проверяем, что еще не добавлено
+                 # Исключаем удаленные функции
+                if func_name != 'process_article_from_tweet':
+                    dependencies[func_name] = func
 
         # Импортируем утилиты для твитов
         from twitter_scraper_tweets import get_tweets_with_selenium
@@ -92,7 +96,7 @@ def initialize_dependencies():
         dependencies['generate_database_statistics'] = generate_database_statistics
         dependencies['display_results_summary'] = display_results_summary
 
-        logger.info("Импорт всех зависимостей завершен успешно")
+        logger.info("Импорт всех зависимостей завершен успешно (без функционала статей)")
         return dependencies
 
     except ImportError as e:
@@ -174,7 +178,7 @@ def main():
     CACHE_DURATION = 1  # Срок действия кэша (в часах)
     MAX_TWEETS = 10  # Увеличенное максимальное количество твитов для каждого аккаунта
     FORCE_REFRESH = True  # Принудительное обновление данных
-    EXTRACT_ARTICLES = True  # Извлекать полные статьи из твитов
+    # EXTRACT_ARTICLES = False # Удалено - функционал статей полностью убран
     EXTRACT_FULL_TWEETS = True  # Извлекать полный текст длинных твитов
     EXTRACT_LINKS = True  # Извлекать все ссылки из твитов
 
@@ -196,13 +200,16 @@ def main():
     print(f"Срок действия кэша: {CACHE_DURATION} час")
     print(f"Максимальное количество твитов: {MAX_TWEETS}")
     print(f"Принудительное обновление: {'ДА' if FORCE_REFRESH else 'НЕТ'}")
-    print(f"Извлечение полных статей: {'ДА' if EXTRACT_ARTICLES else 'НЕТ'}")
+    # print(f"Извлечение полных статей: {'ДА' if EXTRACT_ARTICLES else 'НЕТ'}") # Удалено
     print(f"Извлечение полных твитов: {'ДА' if EXTRACT_FULL_TWEETS else 'НЕТ'}")
     print(f"Извлечение всех ссылок: {'ДА' if EXTRACT_LINKS else 'НЕТ'}")
     print(f"Аккаунты для отслеживания: {', '.join('@' + account for account in accounts_to_track)}")
 
+    # logger.info(f"Параметры: период={HOURS_FILTER}ч, кэш={CACHE_DURATION}ч, макс.твитов={MAX_TWEETS}, " +
+    #             f"обновление={FORCE_REFRESH}, статьи={EXTRACT_ARTICLES}, полные твиты={EXTRACT_FULL_TWEETS}, " +
+    #             f"ссылки={EXTRACT_LINKS}, аккаунтов={len(accounts_to_track)}") # Обновлено
     logger.info(f"Параметры: период={HOURS_FILTER}ч, кэш={CACHE_DURATION}ч, макс.твитов={MAX_TWEETS}, " +
-                f"обновление={FORCE_REFRESH}, статьи={EXTRACT_ARTICLES}, полные твиты={EXTRACT_FULL_TWEETS}, " +
+                f"обновление={FORCE_REFRESH}, полные твиты={EXTRACT_FULL_TWEETS}, " +
                 f"ссылки={EXTRACT_LINKS}, аккаунтов={len(accounts_to_track)}")
 
     # Инициализируем браузер
@@ -240,11 +247,11 @@ def main():
                 cache_duration_hours=CACHE_DURATION,
                 time_filter_hours=HOURS_FILTER,
                 force_refresh=FORCE_REFRESH,
-                extract_articles=EXTRACT_ARTICLES,
+                # extract_articles=EXTRACT_ARTICLES, # Удалено
                 extract_full_tweets=EXTRACT_FULL_TWEETS,
                 extract_links=EXTRACT_LINKS,
                 dependencies=deps,  # Передаем словарь с функциями
-                html_cache_dir=HTML_CACHE_DIR  # Добавляем этот параметр
+                html_cache_dir=HTML_CACHE_DIR
             )
 
             # Проверяем, что результат содержит твиты
@@ -270,7 +277,7 @@ def main():
             return
 
         # Отображаем результаты
-        deps['display_results_summary'](all_results, HOURS_FILTER, IMAGES_DIR)
+        deps['display_results_summary'](all_results, HOURS_FILTER)
 
         # Генерируем статистику
         stats = deps['generate_tweet_statistics'](all_results)

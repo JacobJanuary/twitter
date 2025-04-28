@@ -3,6 +3,7 @@
 """
 Модуль для извлечения твитов из Twitter
 Содержит функции для получения твитов, их обработки и сохранения
+(Функционал обработки статей удален)
 """
 
 import os
@@ -18,14 +19,17 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
 from selenium.webdriver.common.action_chains import ActionChains
 # Импорты для резервного метода
-from twitter_scraper_utils import extract_tweet_stats, extract_images_from_tweet
+from twitter_scraper_utils import extract_tweet_stats
 from twitter_scraper_retweet_utils import extract_retweet_info_enhanced
 from twitter_scraper_links_utils import (
     extract_all_links_from_tweet,
     is_tweet_truncated,
     get_full_tweet_text,
-    extract_full_tweet_text_from_html  # Добавляем новую функцию
+    extract_full_tweet_text_from_html
 )
+# Импорт для статей больше не нужен
+# from twitter_scraper_article_utils import process_article_from_tweet # Удалено
+
 # Настройка логирования
 logger = logging.getLogger('twitter_scraper.tweets')
 
@@ -229,7 +233,6 @@ def process_tweet_fallback(driver, tweet_url, username):
             "created_at": "",
             "url": tweet_url,
             "stats": {"likes": 0, "retweets": 0, "replies": 0},
-            "images": [],
             "is_retweet": False,
             "original_author": None,
             "is_truncated": False
@@ -253,9 +256,6 @@ def process_tweet_fallback(driver, tweet_url, username):
         # Извлекаем статистику
         tweet_element = driver.find_element(By.CSS_SELECTOR, 'article[data-testid="tweet"]')
         tweet_data["stats"] = extract_tweet_stats(tweet_element)
-
-        # Извлекаем изображения
-        tweet_data["images"] = extract_images_from_tweet(tweet_element, username)
 
         # Определяем, является ли твит ретвитом
         retweet_info = extract_retweet_info_enhanced(tweet_element)
@@ -302,16 +302,15 @@ def get_tweet_from_api(tweet_url):
         logger.error(f"Ошибка при запросе твита через API: {e}")
         return None
 
+# Параметр extract_articles удален
 def get_tweets_with_selenium(username, driver, db_connection=None, max_tweets=10, use_cache=True,
                              cache_duration_hours=1, time_filter_hours=24, force_refresh=False,
-                             extract_articles=True, extract_full_tweets=True, extract_links=True,
+                             extract_full_tweets=True, extract_links=True,
                              dependencies=None, html_cache_dir="twitter_html_cache"):
     """
     Получает твиты пользователя с помощью Selenium, включая:
-    - изображения
     - ретвиты
     - полные тексты длинных твитов
-    - связанные статьи
     - все ссылки внутри твитов
 
     Args:
@@ -323,7 +322,7 @@ def get_tweets_with_selenium(username, driver, db_connection=None, max_tweets=10
         cache_duration_hours: Срок действия кэша в часах
         time_filter_hours: Фильтр по времени публикации твитов в часах
         force_refresh: Принудительное обновление данных
-        extract_articles: Извлекать ли статьи из твитов
+        # extract_articles: Извлекать ли статьи из твитов # Удалено
         extract_full_tweets: Извлекать ли полные версии длинных твитов
         extract_links: Извлекать ли все ссылки из твитов
         dependencies: Словарь с необходимыми функциями
@@ -341,13 +340,12 @@ def get_tweets_with_selenium(username, driver, db_connection=None, max_tweets=10
     save_tweet_to_db = dependencies.get('save_tweet_to_db', lambda *args, **kwargs: None)
     filter_recent_tweets = dependencies.get('filter_recent_tweets', lambda *args, **kwargs: [])
     extract_tweet_stats = dependencies.get('extract_tweet_stats', lambda *args, **kwargs: {})
-    extract_images_from_tweet = dependencies.get('extract_images_from_tweet', lambda *args, **kwargs: [])
     extract_retweet_info_enhanced = dependencies.get('extract_retweet_info_enhanced',
                                                      dependencies.get('extract_retweet_info',
                                                                       lambda *args, **kwargs: {}))
     is_tweet_truncated = dependencies.get('is_tweet_truncated', lambda *args, **kwargs: False)
     get_full_tweet_text = dependencies.get('get_full_tweet_text', lambda *args, **kwargs: "")
-    process_article_from_tweet = dependencies.get('process_article_from_tweet', lambda *args, **kwargs: None)
+    # process_article_from_tweet = dependencies.get('process_article_from_tweet', lambda *args, **kwargs: None) # Удалено
     save_links_to_db = dependencies.get('save_links_to_db', lambda *args, **kwargs: None)
     extract_all_links_from_tweet = dependencies.get('extract_all_links_from_tweet', lambda *args, **kwargs: {})
 
@@ -530,7 +528,10 @@ def get_tweets_with_selenium(username, driver, db_connection=None, max_tweets=10
                         # Сохраняем в БД
                         if db_connection and user_id:
                             tweet_db_id = save_tweet_to_db(db_connection, user_id, api_tweet_data)
-                            # ... остальной код сохранения в БД
+                            # Сохраняем ссылки в БД, если включено извлечение ссылок
+                            if extract_links and tweet_db_id and api_tweet_data.get("links") and save_links_to_db:
+                                save_links_to_db(db_connection, tweet_db_id, api_tweet_data["links"])
+                                logger.info(f"Ссылки из API твита сохранены в БД")
 
                         # Пропускаем стандартную обработку
                         continue
@@ -607,9 +608,8 @@ def get_tweets_with_selenium(username, driver, db_connection=None, max_tweets=10
                         # Если нет времени, это может быть специальный элемент
                         continue
 
-                    # Извлекаем статистику и изображения
+                    # Извлекаем статистику
                     stats = extract_tweet_stats(tweet_element)
-                    image_paths = extract_images_from_tweet(tweet_element, username)
 
                     print(f"Извлеченная статистика твита: {stats}")
                     if stats['likes'] == 0 and stats['retweets'] == 0:
@@ -619,17 +619,16 @@ def get_tweets_with_selenium(username, driver, db_connection=None, max_tweets=10
                     # Создаем данные твита
                     # Проверка успешности стандартного метода
                     success = False
-                    if tweet_text or len(image_paths) > 0:
+                    if tweet_text: # Проверяем только наличие текста
                         success = True
                         tweet_data = {
                             "text": tweet_text,
                             "created_at": created_at,
                             "url": tweet_url,
                             "stats": stats,
-                            "images": image_paths,
                             "is_retweet": retweet_info["is_retweet"],
                             "original_author": retweet_info["original_author"],
-                            "is_truncated": False  # По умолчанию твит не обрезан
+                            "is_truncated": is_truncated # Используем флаг is_truncated
                         }
                     else:
                         logger.warning(f"Стандартный метод не смог извлечь данные твита {tweet_id}")
@@ -637,8 +636,7 @@ def get_tweets_with_selenium(username, driver, db_connection=None, max_tweets=10
                     # Если стандартный метод не сработал, применяем резервный
                     if not success and tweet_url:
                         fallback_tweet_data = process_tweet_fallback(driver, tweet_url, username)
-                        if fallback_tweet_data and (
-                                fallback_tweet_data.get("text") or len(fallback_tweet_data.get("images", [])) > 0):
+                        if fallback_tweet_data and fallback_tweet_data.get("text"): # Проверяем только наличие текста
                             tweet_data = fallback_tweet_data
                             success = True
                             logger.info(f"Резервный метод успешно извлек данные твита {tweet_id}")
@@ -647,37 +645,30 @@ def get_tweets_with_selenium(username, driver, db_connection=None, max_tweets=10
 
                     # Если успех, добавляем твит в список
                     if success:
+                        # Извлекаем ссылки перед добавлением в список
+                        if extract_links and extract_all_links_from_tweet:
+                            tweet_data["links"] = extract_all_links_from_tweet(tweet_element, username, expand_first=False)
+
                         tweets_data.append(tweet_data)
                         new_tweets_this_iteration += 1
 
-                    # Сохраняем твит в базу данных и обрабатываем статьи
-                    tweet_db_id = None
-                    if db_connection and user_id and save_tweet_to_db:
-                        # Сохраняем твит в БД
-                        tweet_db_id = save_tweet_to_db(db_connection, user_id, tweet_data)
+                        # Сохраняем твит в базу данных
+                        tweet_db_id = None
+                        if db_connection and user_id and save_tweet_to_db:
+                            # Сохраняем твит в БД
+                            tweet_db_id = save_tweet_to_db(db_connection, user_id, tweet_data)
 
-                        # Сохраняем ссылки в БД, если включено извлечение ссылок
-                        if extract_links and tweet_db_id and tweet_data.get("links") and save_links_to_db:
-                            save_links_to_db(db_connection, tweet_db_id, tweet_data["links"])
-                            logger.info(f"Ссылки из твита сохранены в БД")
+                            # Сохраняем ссылки в БД, если включено извлечение ссылок
+                            if extract_links and tweet_db_id and tweet_data.get("links") and save_links_to_db:
+                                save_links_to_db(db_connection, tweet_db_id, tweet_data["links"])
+                                logger.info(f"Ссылки из твита сохранены в БД")
 
-                        # Проверяем наличие статей в твите
-                        if extract_articles and tweet_db_id and process_article_from_tweet:
-                            print(f"Проверка наличия статей в твите...")
-                            logger.info(f"Проверка наличия статей в твите...")
-                            article_data = process_article_from_tweet(
-                                driver, tweet_element, tweet_db_id, username,
-                                db_connection, use_cache=use_cache
-                            )
+                            # Проверка наличия статей в твите - Удалено
+                            # ... (блок process_article_from_tweet удален) ...
 
-                            if article_data:
-                                tweet_data["article"] = article_data
-                                print(f"К твиту привязана статья: {article_data.get('title', '')}")
-                                logger.info(f"К твиту привязана статья: {article_data.get('title', '')}")
-
-                    print(f"Добавлен твит: {created_at} | {tweet_text[:50]}..." if len(
-                        tweet_text) > 50 else f"Добавлен твит: {created_at} | {tweet_text}")
-                    logger.info(f"Добавлен твит ID: {tweet_id}")
+                        print(f"Добавлен твит: {created_at} | {tweet_text[:50]}..." if len(
+                            tweet_text) > 50 else f"Добавлен твит: {created_at} | {tweet_text}")
+                        logger.info(f"Добавлен твит ID: {tweet_id}")
 
                 except Exception as e:
                     print(f"Ошибка при обработке твита: {e}")
@@ -777,7 +768,6 @@ def get_tweets_with_selenium(username, driver, db_connection=None, max_tweets=10
                     "created_at": created_at,
                     "url": tweet_url,
                     "stats": {"likes": 0, "retweets": 0, "replies": 0},
-                    "images": [],
                     "is_retweet": is_retweet,
                     "original_author": None,
                     "is_truncated": False

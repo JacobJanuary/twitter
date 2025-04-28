@@ -3,6 +3,7 @@
 """
 Модуль для статистики и отображения результатов Twitter скрапера
 Содержит функции для генерации статистики и отображения результатов
+(Функционал обработки статей удален)
 """
 
 import os
@@ -38,19 +39,12 @@ def generate_tweet_statistics(results):
         )
         stats['total_retweets'] = total_retweets
 
-        # Считаем количество изображений
-        total_images = sum(
-            sum(len(tweet.get('images', [])) for tweet in user.get('tweets', []))
-            for user in results
-        )
-        stats['total_images'] = total_images
-
-        # Считаем количество статей
-        total_articles = sum(
-            sum(1 for tweet in user.get('tweets', []) if tweet.get('article'))
-            for user in results
-        )
-        stats['total_articles'] = total_articles
+        # Считаем количество статей - Удалено
+        # total_articles = sum(
+        #     sum(1 for tweet in user.get('tweets', []) if tweet.get('article'))
+        #     for user in results
+        # )
+        # stats['total_articles'] = total_articles
 
         # Считаем количество обработанных длинных твитов
         total_full_tweets = sum(
@@ -83,8 +77,10 @@ def generate_tweet_statistics(results):
         # Считаем общее количество аккаунтов
         stats['total_accounts'] = len(results)
 
+        # logger.info(f"Статистика сгенерирована: {total_tweets} твитов, {total_retweets} ретвитов, " +
+        #             f"{total_articles} статей, {total_full_tweets} длинных твитов") # Обновлено
         logger.info(f"Статистика сгенерирована: {total_tweets} твитов, {total_retweets} ретвитов, " +
-                    f"{total_images} изображений, {total_articles} статей, {total_full_tweets} длинных твитов")
+                    f"{total_full_tweets} длинных твитов")
 
         return stats
 
@@ -113,10 +109,9 @@ def generate_database_statistics(db_connection):
         tables = [
             {"name": "users", "label": "Пользователей"},
             {"name": "tweets", "label": "Твитов"},
-            {"name": "images", "label": "Изображений"},
-            {"name": "articles", "label": "Статей"},
+            # {"name": "articles", "label": "Статей"}, # Удалено
             {"name": "tweet_links", "label": "Ссылок из твитов"},
-            {"name": "article_links", "label": "Ссылок из статей"}
+            # {"name": "article_links", "label": "Ссылок из статей"} # Удалено
         ]
 
         # Подсчет записей в каждой таблице
@@ -127,8 +122,13 @@ def generate_database_statistics(db_connection):
                 db_stats[table['label']] = count
                 logger.info(f"В таблице {table['name']} найдено {count} записей")
             except Error as e:
-                logger.warning(f"Не удалось получить данные из таблицы {table['name']}: {e}")
-                db_stats[table['label']] = "Н/Д"
+                # Если таблицы нет (например, articles), это ожидаемо
+                if e.errno == 1146: # Table doesn't exist
+                     logger.info(f"Таблица {table['name']} не существует (ожидаемо).")
+                     db_stats[table['label']] = 0
+                else:
+                    logger.warning(f"Не удалось получить данные из таблицы {table['name']}: {e}")
+                    db_stats[table['label']] = "Н/Д"
 
         # Детализация по типам ссылок, если таблица существует
         try:
@@ -139,24 +139,13 @@ def generate_database_statistics(db_connection):
                 db_stats[f"Ссылки типа '{link_type}'"] = count
                 logger.info(f"Ссылок типа '{link_type}': {count}")
         except Error as e:
-            logger.warning(f"Не удалось получить данные о типах ссылок: {e}")
+            if e.errno == 1146: # Table doesn't exist
+                 logger.info("Таблица tweet_links не существует.")
+            else:
+                logger.warning(f"Не удалось получить данные о типах ссылок: {e}")
 
-        # Топ доменов статей
-        try:
-            cursor.execute("""
-                SELECT source_domain, COUNT(*) as count 
-                FROM articles 
-                GROUP BY source_domain 
-                ORDER BY count DESC 
-                LIMIT 5
-            """)
-            domain_stats = cursor.fetchall()
-
-            if domain_stats:
-                db_stats["Топ доменов статей"] = {domain: count for domain, count in domain_stats}
-                logger.info(f"Получен топ доменов статей: {domain_stats}")
-        except Error as e:
-            logger.warning(f"Не удалось получить данные о доменах статей: {e}")
+        # Топ доменов статей - Удалено
+        # ... (блок try/except удален) ...
 
         return db_stats
 
@@ -165,14 +154,13 @@ def generate_database_statistics(db_connection):
         return {}
 
 
-def display_results_summary(results, time_filter_hours, images_dir):
+def display_results_summary(results, time_filter_hours):
     """
     Отображает сводку результатов работы скрапера
 
     Args:
         results: Список с результатами сбора твитов
         time_filter_hours: Фильтр по времени публикации твитов в часах
-        images_dir: Директория для сохранения изображений
     """
     logger.info("Отображение сводки результатов")
 
@@ -184,13 +172,15 @@ def display_results_summary(results, time_filter_hours, images_dir):
 
             try:
                 # Получаем функцию форматирования из глобального пространства имен
-                format_time_func = globals().get('format_time_ago')
+                import twitter_scraper_utils
+                format_time_func = getattr(twitter_scraper_utils, 'format_time_ago', None)
                 if format_time_func and callable(format_time_func):
                     return format_time_func(iso_time_str)
                 else:
                     # Базовое форматирование, если функция недоступна
                     return iso_time_str.replace('T', ' ').split('.')[0]
-            except:
+            except Exception as e:
+                logger.error(f"Ошибка при вызове format_time_ago: {e}")
                 return iso_time_str
 
         # Выводим информацию о каждом пользователе и его твитах
@@ -221,13 +211,6 @@ def display_results_summary(results, time_filter_hours, images_dir):
                         print(
                             f"Статистика: 👍 {stats.get('likes', 0)} | 🔄 {stats.get('retweets', 0)} | 💬 {stats.get('replies', 0)}")
 
-                        # Выводим информацию о прикрепленных изображениях
-                        images = tweet.get("images", [])
-                        if images:
-                            print(f"Изображения ({len(images)}):")
-                            for img_path in images:
-                                print(f"  - {img_path}")
-
                         # Выводим информацию о ссылках в твите
                         if tweet.get("links"):
                             links = tweet.get("links")
@@ -250,14 +233,8 @@ def display_results_summary(results, time_filter_hours, images_dir):
                                 for hashtag in links["hashtags"]:
                                     print(f"  - #{hashtag}")
 
-                        # Выводим информацию о статье, если есть
-                        if tweet.get("article"):
-                            article = tweet.get("article")
-                            print(f"📄 Статья: {article.get('title', '')}")
-                            print(f"  Источник: {article.get('source_domain', '')}")
-                            print(f"  Автор: {article.get('author', 'Не указан')}")
-                            print(f"  Дата публикации: {article.get('published_date', 'Не указана')}")
-                            print(f"  URL: {article.get('url', '')}")
+                        # Выводим информацию о статье, если есть - Удалено
+                        # ... (блок if tweet.get("article") удален) ...
 
                         # Отмечаем, если твит был обрезан и получен полный текст
                         if tweet.get("is_truncated"):
@@ -273,15 +250,13 @@ def display_results_summary(results, time_filter_hours, images_dir):
         print("\n===== ОБЩАЯ СТАТИСТИКА =====")
         print(f"\nВсего получено: {stats.get('total_tweets', 0)} твитов")
         print(f"Из них ретвитов: {stats.get('total_retweets', 0)}")
-        print(f"Всего сохранено изображений: {stats.get('total_images', 0)}")
-        print(f"Всего извлечено статей: {stats.get('total_articles', 0)}")
+        # print(f"Всего извлечено статей: {stats.get('total_articles', 0)}") # Удалено
         print(f"Всего обработано длинных твитов: {stats.get('total_full_tweets', 0)}")
         print(f"Всего извлечено внешних ссылок: {stats.get('total_external_links', 0)}")
         print(f"Всего упоминаний: {stats.get('total_mentions', 0)}")
         print(f"Всего хэштегов: {stats.get('total_hashtags', 0)}")
         print(f"Число аккаунтов с контентом: {stats.get('total_accounts', 0)} из {len(results)}")
         print(f"Период: последние {time_filter_hours} часа")
-        print(f"Изображения сохранены в директории: {os.path.abspath(images_dir)}")
 
         logger.info("Сводка результатов отображена успешно")
 

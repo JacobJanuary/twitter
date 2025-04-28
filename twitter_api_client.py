@@ -73,7 +73,7 @@ def process_api_tweet_data(api_data, tweet_url):
                 "retweets": api_data.get("retweet_count", 0),
                 "replies": api_data.get("reply_count", 0)
             },
-            "images": [],
+            # "images": [], # Удалено
             "is_retweet": False,
             "original_author": None,
             "is_truncated": False
@@ -93,17 +93,18 @@ def process_api_tweet_data(api_data, tweet_url):
             if "user" in api_data.get("retweeted_status", {}):
                 tweet_data["original_author"] = api_data["retweeted_status"]["user"].get("screen_name")
 
-        # Добавление медиа
-        if "photos" in api_data:
-            for photo in api_data["photos"]:
-                if "url" in photo:
-                    tweet_data["images"].append(photo["url"])
+        # Добавление медиа - Удалено
+        # if "photos" in api_data:
+        #     for photo in api_data["photos"]:
+        #         if "url" in photo:
+        #             tweet_data["images"].append(photo["url"])
 
-        # Добавление видео превью
-        if "video" in api_data and api_data["video"].get("poster"):
-            tweet_data["images"].append(api_data["video"]["poster"])
+        # Добавление видео превью - Удалено
+        # if "video" in api_data and api_data["video"].get("poster"):
+        #     tweet_data["images"].append(api_data["video"]["poster"])
 
         return tweet_data
     except Exception as e:
         logger.error(f"Ошибка при обработке данных API: {e}")
         return None
+
