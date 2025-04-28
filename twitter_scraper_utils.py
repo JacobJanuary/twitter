@@ -684,3 +684,4 @@ def extract_tweet_stats(tweet_element):
 
     print(f"Итоговая статистика твита: {stats}")
     return stats
+

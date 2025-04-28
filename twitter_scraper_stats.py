@@ -263,3 +263,4 @@ def display_results_summary(results, time_filter_hours):
     except Exception as e:
         logger.error(f"Ошибка при отображении сводки результатов: {e}")
         print(f"Ошибка при отображении результатов: {e}")
+

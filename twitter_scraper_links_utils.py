@@ -520,3 +520,4 @@ def extract_full_tweet_text_from_html(driver, tweet_url):
         except Exception as close_e:
              logger.error(f"Ошибка при закрытии/переключении вкладки после ошибки (HTML метод): {close_e}")
         return ""
+

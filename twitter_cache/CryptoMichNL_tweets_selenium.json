@@ -1,0 +1,111 @@
+{
+  "username": "CryptoMichNL",
+  "name": "",
+  "tweets": [
+    {
+      "text": "$VET has obtained the MiCAR license and onboarded Dana White as an advisor.\n\nWe discussed why this is crucial to get mass-adoption alongside #VeChain founder, \n@sunshinelu24\n, in a new episode of the \n@new_era_finance\n podcast!\n\nWatch it here:\nhttps://youtu.be/YDfVFcb07A0",
+      "created_at": "2025-04-15T15:00:02.000Z",
+      "url": "https://x.com/CryptoMichNL/status/1912158984582418508",
+      "stats": {
+        "likes": 494,
+        "retweets": 102,
+        "replies": 48
+      },
+      "is_retweet": true,
+      "original_author": "search",
+      "is_truncated": false,
+      "links": {
+        "external_urls": [
+          "https://www.youtube.com/watch?v=YDfVFcb07A0&feature=youtu.be"
+        ],
+        "mentions": [
+          "sunshinelu24",
+          "new_era_finance"
+        ],
+        "hashtags": [
+          "VeChain"
+        ],
+        "media_urls": []
+      }
+    },
+    {
+      "text": "Strong bullish divergence on $SEI starting to fire up.\n\nI assume this one will continue to run in the coming period, possibly targeting 600-800 sats.",
+      "created_at": "2025-04-28T15:08:00.000Z",
+      "url": "https://x.com/CryptoMichNL/status/1916872029938258319",
+      "stats": {
+        "likes": 249,
+        "retweets": 4,
+        "replies": 4
+      },
+      "is_retweet": true,
+      "original_author": "search",
+      "is_truncated": false,
+      "links": {
+        "external_urls": [],
+        "mentions": [],
+        "hashtags": [],
+        "media_urls": [
+          "https://x.com/CryptoMichNL/status/1916872029938258319/photo/1"
+        ]
+      }
+    },
+    {
+      "text": "A 9% move of #Bitcoin since it went upwards after the breakout. \n\nSince then, #Altcoins start to show more strength and I assume we'll continue to have that momentum.\n\nI'd prefer to see Bitcoin hold above $90K and continue the upwards rally.",
+      "created_at": "2025-04-28T13:29:00.000Z",
+      "url": "https://x.com/CryptoMichNL/status/1916847115948769341",
+      "stats": {
+        "likes": 202,
+        "retweets": 28,
+        "replies": 51
+      },
+      "is_retweet": true,
+      "original_author": "hashtag/Bitcoin",
+      "is_truncated": false,
+      "links": {
+        "external_urls": [],
+        "mentions": [],
+        "hashtags": [
+          "Bitcoin",
+          "Altcoins"
+        ],
+        "media_urls": [
+          "https://x.com/CryptoMichNL/status/1916847115948769341/photo/1"
+        ]
+      }
+    },
+    {
+      "text": "$WAL continues to show strength. \n\nI personally fancy the project, as it's DePIN within $SUI. \n\nOur Venture Capital invests in a lot of DePIN protocols as we believe that DePIN is a great vertical within the industry.\n\nWalrus provides a lot of strength and is currently a top 100 protocol, through which it's basically sailing on the strength of the entire $SUI ecosystem.\n\nBig event coming up: SUI Basecamp, the prime event of the ecosystem. \n\nLooking forward to it!",
+      "created_at": "2025-04-28T12:02:25.000Z",
+      "url": "https://x.com/CryptoMichNL/status/1916825326589530338",
+      "stats": {
+        "likes": 85,
+        "retweets": 8,
+        "replies": 41
+      },
+      "is_retweet": true,
+      "original_author": "search",
+      "is_truncated": false,
+      "links": {
+        "external_urls": [],
+        "mentions": [],
+        "hashtags": [],
+        "media_urls": [
+          "https://x.com/CryptoMichNL/status/1916825326589530338/photo/1"
+        ]
+      }
+    },
+    {
+      "text": "U.S. crypto exchange app traffic remains a reliable gauge of retail momentum. The market’s trending higher, and last week’s jump to 1.2M daily active users is encouraging — but we likely need to clear 1.5M DAUs for true liftoff. A major catalyst — like the surge after Trump’s election — could quickly ignite a fresh retail wave. Until then, interest remains muted (still well below November levels), and betting on a full-blown alt season looks risky.",
+      "created_at": "2025-04-28T12:41:51.000Z",
+      "url": "https://twitter.com/Chyan/status/1916835249100898485/photo/1",
+      "stats": {
+        "likes": 0,
+        "retweets": 0,
+        "replies": 0
+      },
+      "is_retweet": false,
+      "original_author": null,
+      "is_truncated": false
+    }
+  ]
+}

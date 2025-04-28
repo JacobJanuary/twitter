@@ -661,3 +661,4 @@ def get_tweets_with_selenium(username, driver, db_connection=None, max_tweets=10
         # import traceback # Раскомментируйте для детальной трассировки
         # traceback.print_exc()
         return result # Возвращаем пустой или частично заполненный результат
+

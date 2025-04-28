@@ -346,7 +346,6 @@ def main():
                  print(f"- {label}: {value}")
             logger.info(f"Общая статистика: {total_stats}")
 
-
         # Если есть подключение к БД, получаем статистику базы данных
         if db_connection:
             db_stats = deps['generate_database_statistics'](db_connection)

@@ -12,7 +12,6 @@ import re
 
 logger = logging.getLogger('twitter_scraper.api')
 
-
 def get_tweet_by_id(tweet_id):
     """
     Получает полные данные твита по его ID через API

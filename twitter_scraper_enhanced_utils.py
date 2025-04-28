@@ -101,3 +101,4 @@ logger.info("Модуль twitter_scraper_enhanced_utils инициализир�
 def process_article_from_tweet(*args, **kwargs):
     logger.debug("Вызвана заглушка process_article_from_tweet (функционал статей удален).")
     return None
+
