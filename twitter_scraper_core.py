@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Основной модуль скрапера Twitter.
-API вызовы отключены. Обработка ретвитов изменена.
-Оптимизирована работа с БД (пакетная вставка/обновление).
+Основной модуль скрапера Twitter, содержащий функции для инициализации и запуска скрапера
+(Функционал изображений, ссылок и статей удален)
 """
 
 import os
@@ -11,34 +10,58 @@ import sys
 import json
 import time
 import logging
-import re
 from selenium import webdriver
+# Доп. импорты Selenium убраны, так как они используются в utils/tweets
+# from selenium.webdriver.common.by import By
+# from selenium.webdriver.support.ui import WebDriverWait
+# from selenium.webdriver.support import expected_conditions as EC
+# from selenium.common.exceptions import TimeoutException
 
-# Настройка логирования
+# Настройка логирования (один раз здесь)
 log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 log_handler = logging.FileHandler('twitter_scraper.log', mode='a', encoding='utf-8')
 log_handler.setFormatter(log_formatter)
+
+# Логгер для всего проекта
 logger = logging.getLogger('twitter_scraper')
-logger.setLevel(logging.INFO)
-if logger.hasHandlers(): logger.handlers.clear()
+logger.setLevel(logging.INFO) # Устанавливаем уровень логирования
 logger.addHandler(log_handler)
+
+# Добавляем вывод в консоль для INFO и выше
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(log_formatter)
 console_handler.setLevel(logging.INFO)
 logger.addHandler(console_handler)
 
+
 # Настройки
+# Убедитесь, что путь к профилю Chrome правильный для вашей системы
 CHROME_PROFILE_PATH = "/Users/evgeniyyanvarskiy/Library/Application Support/Google/Chrome/Profile 1/" # Пример для macOS
+# CHROME_PROFILE_PATH = "C:\\Users\\YourUser\\AppData\\Local\\Google\\Chrome\\User Data\\Profile 1" # Пример для Windows
+# CHROME_PROFILE_PATH = "~/.config/google-chrome/Profile 1" # Пример для Linux
+
 CACHE_DIR = "twitter_cache"
-HTML_CACHE_DIR = "twitter_html_cache"
+# IMAGES_DIR удален
+# ARTICLE_CACHE_DIR удален
+# LINKS_CACHE_DIR удален
+HTML_CACHE_DIR = "twitter_html_cache"  # Директория для временных HTML (для отладки)
 
-# Создаем директории
+# Создаем необходимые директории
+# Убраны IMAGES_DIR, ARTICLE_CACHE_DIR, LINKS_CACHE_DIR
 for directory in [CACHE_DIR, HTML_CACHE_DIR]:
-    os.makedirs(directory, exist_ok=True)
+    if not os.path.exists(directory):
+        try:
+            os.makedirs(directory, exist_ok=True)
+            logger.info(f"Создана директория: {directory}")
+        except OSError as e:
+             logger.error(f"Не удалось создать директорию {directory}: {e}")
+    else:
+         logger.debug(f"Директория существует: {directory}")
 
-# Настройки MySQL
+
+# Настройки подключения к MySQL
 MYSQL_CONFIG = {
-    'host': '217.154.19.224',
+    'host': '217.154.19.224', # Используйте localhost, если БД на той же машине
     'database': 'twitter_data',
     'user': 'elcrypto',
     'password': 'LohNeMamont@!21',
@@ -47,326 +70,315 @@ MYSQL_CONFIG = {
 
 
 def initialize_dependencies():
-    """Импортирует и возвращает зависимости."""
+    """
+    Импортирует необходимые модули и проверяет их наличие
+    Возвращает словарь с импортированными модулями
+    """
     dependencies = {}
     logger.info("Инициализация зависимостей...")
+
     try:
-        # Базовые утилиты (включая НОВУЮ функцию пакетной вставки)
+        # Импортируем базовые утилиты
         from twitter_scraper_utils import (
-            debug_print, initialize_mysql, save_user_to_db, save_tweets_batch_to_db, # <-- ИЗМЕНЕНО
+            debug_print, initialize_mysql, save_user_to_db, save_tweet_to_db,
             parse_twitter_date, filter_recent_tweets, format_time_ago,
             initialize_browser, manual_auth_with_prompt,
-            extract_tweet_stats
+            # download_image, extract_images_from_tweet, save_image_to_db удалены
+            extract_tweet_stats, extract_retweet_info # Базовый extract_retweet_info тоже импортируем на всякий случай
         )
-        utils_funcs = {
-            'debug_print': debug_print, 'initialize_mysql': initialize_mysql,
-            'save_user_to_db': save_user_to_db, 'save_tweets_batch_to_db': save_tweets_batch_to_db, # <-- ИЗМЕНЕНО
-            'parse_twitter_date': parse_twitter_date, 'filter_recent_tweets': filter_recent_tweets,
-            'format_time_ago': format_time_ago, 'initialize_browser': initialize_browser,
-            'manual_auth_with_prompt': manual_auth_with_prompt, 'extract_tweet_stats': extract_tweet_stats
-        }
+        # Добавляем в словарь
+        utils_funcs = {k: v for k, v in locals().items() if callable(v) and not k.startswith('_')}
         dependencies.update(utils_funcs)
         logger.debug("Базовые утилиты импортированы.")
 
-        # Утилиты для текста твитов
-        from twitter_scraper_links_utils import is_tweet_truncated, get_full_tweet_text
-        dependencies['is_tweet_truncated'] = is_tweet_truncated
-        dependencies['get_full_tweet_text'] = get_full_tweet_text
+        # Импортируем утилиты для ссылок (только нужные)
+        from twitter_scraper_links_utils import (
+            # extract_all_links_from_tweet, save_links_to_db удалены
+            is_tweet_truncated,
+            get_full_tweet_text,
+            extract_full_tweet_text_from_html
+        )
+        links_funcs = {k: v for k, v in locals().items() if callable(v) and k in [
+            'is_tweet_truncated', 'get_full_tweet_text', 'extract_full_tweet_text_from_html']}
+        dependencies.update(links_funcs)
         logger.debug("Утилиты для текста твитов импортированы.")
 
-        # Утилиты для ретвитов
-        from twitter_scraper_retweet_utils import extract_retweet_info_enhanced, get_author_info
-        dependencies['extract_retweet_info_enhanced'] = extract_retweet_info_enhanced
-        dependencies['get_author_info'] = get_author_info
-        logger.debug("Утилиты для ретвитов (enhanced) импортированы.")
+        # --- Импорт утилит для статей удален ---
+        # from twitter_scraper_article_utils import ...
 
-        # Утилиты для сбора твитов (возвращает все собранные)
+        # Импортируем утилиты для ретвитов (из enhanced_utils, который сам импортирует retweet_utils)
+        from twitter_scraper_enhanced_utils import (
+            extract_retweet_info_enhanced,
+            # extract_retweet_info_basic, get_author_info # Они тоже импортируются, но основной - enhanced
+        )
+        retweet_funcs = {k: v for k, v in locals().items() if callable(v) and k in ['extract_retweet_info_enhanced']}
+        dependencies.update(retweet_funcs)
+        # Добавим базовую функцию ретвитов, если enhanced не импортировалась
+        if 'extract_retweet_info_enhanced' not in dependencies and 'extract_retweet_info' in dependencies:
+             dependencies['extract_retweet_info_enhanced'] = dependencies['extract_retweet_info']
+             logger.warning("Используется базовая функция extract_retweet_info вместо enhanced.")
+        logger.debug("Утилиты для ретвитов импортированы.")
+
+
+        # Импортируем утилиты для твитов
         from twitter_scraper_tweets import get_tweets_with_selenium
         dependencies['get_tweets_with_selenium'] = get_tweets_with_selenium
         logger.debug("Утилиты для сбора твитов импортированы.")
 
-        # Утилиты для статистики
-        from twitter_scraper_stats import generate_tweet_statistics, generate_database_statistics, display_results_summary
-        dependencies['generate_tweet_statistics'] = generate_tweet_statistics
-        dependencies['generate_database_statistics'] = generate_database_statistics
-        dependencies['display_results_summary'] = display_results_summary
+        # Импортируем утилиты для статистики
+        from twitter_scraper_stats import (
+            generate_tweet_statistics, generate_database_statistics,
+            display_results_summary
+        )
+        stats_funcs = {k: v for k, v in locals().items() if callable(v) and k in [
+            'generate_tweet_statistics', 'generate_database_statistics', 'display_results_summary']}
+        dependencies.update(stats_funcs)
         logger.debug("Утилиты для статистики импортированы.")
 
-        # API клиент (заглушки)
-        from twitter_api_client import get_tweet_by_id, process_api_tweet_data
-        dependencies['get_tweet_by_id'] = get_tweet_by_id
-        dependencies['process_api_tweet_data'] = process_api_tweet_data
-        logger.debug("API клиент (заглушки) импортирован.")
+        # Импортируем API клиент
+        try:
+            from twitter_api_client import get_tweet_by_id, process_api_tweet_data
+            dependencies['get_tweet_by_id'] = get_tweet_by_id
+            dependencies['process_api_tweet_data'] = process_api_tweet_data
+            logger.debug("API клиент импортирован.")
+        except ImportError:
+             logger.warning("Не удалось импортировать API клиент. Сбор через API будет недоступен.")
+             dependencies['get_tweet_by_id'] = lambda tweet_id: None
+             dependencies['process_api_tweet_data'] = lambda api_data, tweet_url: None
+
 
         logger.info("Импорт всех зависимостей завершен успешно")
         return dependencies
 
     except ImportError as e:
-        logger.critical(f"КРИТИЧЕСКАЯ ОШИБКА: Не удалось импортировать: {e}")
-        logger.critical("Убедитесь, что все файлы .py находятся в той же директории.")
-        import traceback; logger.error(traceback.format_exc())
+        logger.critical(f"КРИТИЧЕСКАЯ ОШИБКА: Не удалось импортировать необходимые функции: {e}")
+        logger.critical("Убедитесь, что все файлы (_utils.py, _tweets.py, _stats.py, _links_utils.py, _retweet_utils.py, _enhanced_utils.py, _api_client.py) находятся в той же директории.")
         sys.exit(1)
 
 
 def load_accounts_from_file(filename="influencer_twitter.txt"):
     """Загружает аккаунты Twitter из файла"""
-    # (Код без изменений)
     accounts = []
     logger.info(f"Загрузка аккаунтов из файла: {filename}")
     try:
-        with open(filename, 'r', encoding='utf-8') as f: lines = f.readlines()
-        processed_usernames = set()
+        with open(filename, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
         for line_num, line in enumerate(lines, 1):
             line = line.strip()
-            if not line or line.startswith('#'): continue
+            if not line or line.startswith('#'):
+                continue
+
+            # Извлекаем username из URL или просто берем строку
             username = None
-            if line.startswith('http://') or line.startswith('https://'):
+            if line.startswith('http'):
                 try:
+                    # Удаляем возможные параметры и последний слэш
                     clean_url = line.split('?')[0].split('#')[0].rstrip('/')
                     parts = clean_url.split('/')
                     if len(parts) > 0:
                          potential_username = parts[-1]
-                         if potential_username and re.match(r'^[A-Za-z0-9_]{1,15}$', potential_username): username = potential_username
-                         else: logger.warning(f"Не валидный username из URL '{line}' в строке {line_num}")
-                    else: logger.warning(f"Некорректный URL '{line}' в строке {line_num}")
-                except Exception as e: logger.warning(f"Ошибка извлечения username из URL '{line}' ({line_num}): {e}")
+                         # Простая проверка на валидность username
+                         if potential_username and potential_username.isalnum() or '_' in potential_username:
+                              username = potential_username
+                         else:
+                              logger.warning(f"Не удалось извлечь username из URL '{line}' в строке {line_num}")
+                except Exception as e:
+                     logger.warning(f"Ошибка извлечения username из URL '{line}' в строке {line_num}: {e}")
             else:
-                potential_username = line.lstrip('@')
-                if potential_username and re.match(r'^[A-Za-z0-9_]{1,15}$', potential_username): username = potential_username
-                else: logger.warning(f"Некорректный формат username '{line}' в строке {line_num}")
-            if username and username.lower() not in processed_usernames:
-                 accounts.append(username); processed_usernames.add(username.lower())
-            elif not username and line: logger.warning(f"Пропущена строка {line_num}: '{line}'")
-        logger.info(f"Загружено {len(accounts)} уникальных аккаунтов из {filename}")
+                username = line.lstrip('@')
+                if not (username and (username.isalnum() or '_' in username)):
+                     logger.warning(f"Некорректный формат username '{line}' в строке {line_num}")
+                     username = None # Сбрасываем, если формат неверный
+
+            if username and username not in accounts: # Добавляем только уникальные
+                accounts.append(username)
+            elif not username:
+                 logger.warning(f"Пропущена строка {line_num} в файле {filename}: '{line}'")
+
+
+        logger.info(f"Загружено {len(accounts)} уникальных аккаунтов из файла {filename}")
         return accounts
-    except FileNotFoundError: logger.error(f"Файл {filename} не найден!"); return []
-    except Exception as e: logger.error(f"Ошибка чтения файла {filename}: {e}"); return []
+
+    except FileNotFoundError:
+        logger.error(f"Файл {filename} не найден! Пожалуйста, создайте файл и добавьте в него Twitter-аккаунты (по одному на строку, можно URL или @username).")
+        return []
+    except Exception as e:
+        logger.error(f"Ошибка при чтении файла {filename}: {e}")
+        return []
 
 
 def main():
-    """Основная функция скрапера"""
-    logger.info("="*30 + " ЗАПУСК СКРАПЕРА TWITTER (BATCH DB MODE) " + "="*30)
+    """
+    Основная функция скрапера
+    """
+    logger.info("="*30)
+    logger.info("=== ЗАПУСК СКРИПТА ПО СБОРУ ТВИТОВ ===")
+    logger.info("="*30)
 
     deps = initialize_dependencies()
 
-    # Проверка профиля Chrome
-    effective_chrome_path = None
-    if CHROME_PROFILE_PATH:
-         abs_profile_path = os.path.abspath(CHROME_PROFILE_PATH)
-         if os.path.exists(abs_profile_path) and os.path.isdir(abs_profile_path):
-              logger.info(f"Найден профиль Chrome: {abs_profile_path}"); effective_chrome_path = abs_profile_path
-         else: logger.warning(f"Профиль Chrome НЕ НАЙДЕН: {abs_profile_path}. Используется временный.")
-    else: logger.info("Профиль Chrome не указан. Используется временный.")
+    if not os.path.exists(CHROME_PROFILE_PATH):
+         logger.warning(f"Указанный профиль Chrome НЕ НАЙДЕН: {CHROME_PROFILE_PATH}")
+         logger.warning("Будет использован временный профиль Chrome.")
+         effective_chrome_path = None
+    else:
+         logger.info(f"Используется профиль Chrome: {CHROME_PROFILE_PATH}")
+         effective_chrome_path = CHROME_PROFILE_PATH
 
-    # Подключение к MySQL
+
     logger.info("--- Подключение к MySQL ---")
     db_connection = None
     try:
         db_connection = deps['initialize_mysql'](MYSQL_CONFIG)
         if db_connection and db_connection.is_connected():
             logger.info("Успешное подключение к MySQL")
-            db_connection.autocommit = False # Управляем транзакциями вручную
-            logger.info("Autocommit отключен для MySQL соединения.")
         else:
-            if not (db_connection and db_connection.is_connected()):
-                 logger.warning("Не удалось подключиться к MySQL.")
-                 answer = input("Продолжить без сохранения в БД? (да/нет): ")
-                 if answer.lower() not in ['да', 'yes', 'y', 'д']: logger.info("Отмена запуска без MySQL."); return
-                 db_connection = None
-            else: logger.error("initialize_mysql вернула некорректный результат."); db_connection = None
-    except Exception as e: logger.error(f"Критическая ошибка инициализации MySQL: {e}"); db_connection = None
+            logger.warning("Не удалось подключиться к MySQL. Данные не будут сохранены в базу.")
+            # Спрашиваем пользователя, продолжать ли
+            answer = input("Не удалось подключиться к MySQL. Продолжить без сохранения в БД? (да/нет): ")
+            if answer.lower() not in ['да', 'yes', 'y', 'д']:
+                logger.info("Пользователь отменил запуск без MySQL. Выход из программы.")
+                print("Выход из программы...")
+                return
+            db_connection = None # Устанавливаем в None, если пользователь согласился продолжить
+    except Exception as e:
+         logger.error(f"Ошибка при инициализации MySQL: {e}")
+         db_connection = None # Считаем, что подключения нет
 
-    # Параметры скрапинга
+
+    # Параметры для настройки
     HOURS_FILTER = 24
     CACHE_DURATION = 1
-    MAX_TWEETS_DISPLAY = 15 # Лимит для отображения
-    FORCE_REFRESH = True
-    EXTRACT_FULL_TWEETS = True
+    MAX_TWEETS = 15 # Немного увеличим
+    FORCE_REFRESH = True # По умолчанию обновляем принудительно
+    # EXTRACT_ARTICLES удален
+    EXTRACT_FULL_TWEETS = True # Оставляем извлечение полных твитов
+    # EXTRACT_LINKS удален
 
     accounts_to_track = load_accounts_from_file("influencer_twitter.txt")
+
     if not accounts_to_track:
-        logger.critical("Список аккаунтов пуст. Завершение.");
-        if db_connection and db_connection.is_connected(): db_connection.close()
+        logger.warning("Список аккаунтов пуст или файл не найден. Завершение работы.")
+        print("Ошибка: Файл 'influencer_twitter.txt' не найден или пуст. Нечего отслеживать.")
         return
 
-    logger.info("--- Основные параметры скрапинга ---")
-    logger.info(f"Период для фильтрации твитов (отображение): последние {HOURS_FILTER} часа")
+    logger.info("--- Основные параметры ---")
+    logger.info(f"Период твитов: последние {HOURS_FILTER} часа")
     logger.info(f"Срок действия кэша: {CACHE_DURATION} час")
-    logger.info(f"Макс. твитов на аккаунт (для отображения): {MAX_TWEETS_DISPLAY}")
-    logger.info(f"Принудительное обновление (игнорировать кэш): {'ДА' if FORCE_REFRESH else 'НЕТ'}")
-    logger.info(f"Извлечение полных текстов: {'ДА' if EXTRACT_FULL_TWEETS else 'НЕТ'}")
-    logger.info(f"Аккаунты ({len(accounts_to_track)}): {', '.join('@' + a for a in accounts_to_track)}")
+    logger.info(f"Максимальное количество твитов на аккаунт: {MAX_TWEETS}")
+    logger.info(f"Принудительное обновление кэша: {'ДА' if FORCE_REFRESH else 'НЕТ'}")
+    # logger.info(f"Извлечение полных статей: {'ДА' if EXTRACT_ARTICLES else 'НЕТ'}") # Удалено
+    logger.info(f"Извлечение полных твитов: {'ДА' if EXTRACT_FULL_TWEETS else 'НЕТ'}")
+    # logger.info(f"Извлечение всех ссылок: {'ДА' if EXTRACT_LINKS else 'НЕТ'}") # Удалено
+    logger.info(f"Аккаунты для отслеживания ({len(accounts_to_track)}): {', '.join('@' + account for account in accounts_to_track)}")
 
-    driver = None
+    driver = None # Инициализируем переменную драйвера
     try:
         logger.info("--- Инициализация браузера Chrome ---")
         driver = deps['initialize_browser'](effective_chrome_path)
         if not driver:
-            logger.critical("Не удалось инициализировать браузер.")
-            if db_connection and db_connection.is_connected(): db_connection.close()
+            logger.critical("Не удалось инициализировать браузер. Завершение работы.")
+            print("Критическая ошибка: Не удалось запустить браузер Chrome.")
             return
-        logger.info("Браузер Chrome инициализирован")
+
+        logger.info("Браузер Chrome успешно инициализирован")
 
         logger.info("--- Авторизация в Twitter ---")
         auth_result = deps['manual_auth_with_prompt'](driver)
-        if not auth_result: logger.warning("Авторизация не подтверждена.")
-        else: logger.info(f"Авторизация подтверждена.")
+        logger.info(f"Результат подтверждения авторизации: {'УСПЕШНО' if auth_result else 'НЕ ПОДТВЕРЖДЕНО'}")
+        # Продолжаем в любом случае, но логируем результат
 
-        all_results_for_display = [] # Список для хранения данных для итоговой сводки
+        all_results = []
         start_time_total = time.time()
 
-        # --- Основной цикл обработки аккаунтов ---
         for i, username in enumerate(accounts_to_track, 1):
-            logger.info(f"\n=== Обработка аккаунта {i}/{len(accounts_to_track)}: @{username} ===")
+            logger.info(f"=== Обработка аккаунта {i}/{len(accounts_to_track)}: @{username} ===")
             start_time_user = time.time()
-            collected_data = None # Результат от get_tweets_with_selenium
 
-            try:
-                # --- Шаг 1: Сбор всех твитов для пользователя ---
-                collected_data = deps['get_tweets_with_selenium'](
-                    username=username,
-                    driver=driver,
-                    db_connection=db_connection, # Нужно для save_user_to_db
-                    max_tweets=MAX_TWEETS_DISPLAY, # Этот параметр теперь меньше влияет на сбор
-                    use_cache=not FORCE_REFRESH,
-                    cache_duration_hours=CACHE_DURATION,
-                    time_filter_hours=HOURS_FILTER, # Фильтр кэша все еще нужен
-                    force_refresh=FORCE_REFRESH,
-                    extract_full_tweets=EXTRACT_FULL_TWEETS,
-                    dependencies=deps,
-                    html_cache_dir=HTML_CACHE_DIR
-                )
+            user_data = deps['get_tweets_with_selenium'](
+                username=username,
+                driver=driver,
+                db_connection=db_connection,
+                max_tweets=MAX_TWEETS,
+                use_cache=not FORCE_REFRESH, # Используем кэш, если не форсируем обновление
+                cache_duration_hours=CACHE_DURATION,
+                time_filter_hours=HOURS_FILTER,
+                force_refresh=FORCE_REFRESH,
+                # extract_articles=EXTRACT_ARTICLES, # Удалено
+                extract_full_tweets=EXTRACT_FULL_TWEETS,
+                # extract_links=EXTRACT_LINKS, # Удалено
+                dependencies=deps,
+                html_cache_dir=HTML_CACHE_DIR
+            )
 
-                # Проверяем, что данные получены корректно
-                if not collected_data or not isinstance(collected_data, dict) or "tweets" not in collected_data:
-                     logger.error(f"Не удалось получить корректные данные для @{username}. Пропускаем.")
-                     continue # Переходим к следующему пользователю
+            end_time_user = time.time()
+            logger.info(f"Завершена обработка @{username} за {end_time_user - start_time_user:.2f} сек.")
 
-                all_user_tweets = collected_data.get("tweets", [])
-                user_info = collected_data.get("user_info", {"username": username, "name": username})
-                # user_id получаем из collected_data, если пользователь был сохранен
-                user_id_for_db = collected_data.get("user_id")
+            # Проверяем, что результат содержит твиты
+            if user_data and user_data.get("tweets"):
+                all_results.append(user_data)
+                logger.info(f"Найдено {len(user_data['tweets'])} свежих твитов от @{username}")
+            else:
+                logger.info(f"Нет свежих твитов от @{username} за последние {HOURS_FILTER} часа")
 
-                if not all_user_tweets:
-                    logger.info(f"Не найдено твитов для @{username} в результате сбора (возможно, из кэша).")
-                else:
-                    logger.info(f"Собрано {len(all_user_tweets)} твитов/ретвитов для @{username}.")
-
-                    # --- Шаг 2: Пакетное сохранение в БД ---
-                    if db_connection and db_connection.is_connected() and user_id_for_db:
-                        logger.info(f"Запуск пакетного сохранения {len(all_user_tweets)} твитов для @{username} (user_id: {user_id_for_db})...")
-                        save_result = deps['save_tweets_batch_to_db'](db_connection, all_user_tweets)
-
-                        if save_result is not None:
-                            logger.info(f"Пакетное сохранение для @{username} завершено. Затронуто строк: {save_result}.")
-                            # Коммит транзакции ПОСЛЕ успешной пакетной вставки
-                            try:
-                                db_connection.commit()
-                                logger.info(f"Данные для @{username} сохранены в БД (COMMIT выполнен).")
-                            except Exception as commit_err:
-                                logger.error(f"Ошибка при COMMIT данных для @{username}: {commit_err}")
-                                try:
-                                     logger.warning(f"Попытка ROLLBACK из-за ошибки COMMIT для @{username}")
-                                     db_connection.rollback()
-                                except Exception as rb_err: logger.error(f"Ошибка ROLLBACK: {rb_err}")
-                        else:
-                            logger.error(f"Ошибка при пакетном сохранении данных для @{username}. Попытка ROLLBACK...")
-                            try: db_connection.rollback()
-                            except Exception as rb_err: logger.error(f"Ошибка ROLLBACK: {rb_err}")
-                    elif not db_connection:
-                         logger.info("Работа без БД, сохранение пакета пропущено.")
-                    elif not user_id_for_db:
-                         logger.error(f"Не удалось получить user_id для @{username}, пакетное сохранение невозможно.")
-
-
-                # --- Шаг 3: Подготовка данных для отображения ---
-                # Фильтруем собранные (или из кэша) твиты по времени для сводки
-                recent_tweets_for_display = deps['filter_recent_tweets'](all_user_tweets, HOURS_FILTER)
-                logger.info(f"Отфильтровано {len(recent_tweets_for_display)} свежих твитов для отображения.")
-
-                # Сохраняем результат для финальной сводки
-                display_data = {
-                    "username": user_info.get("username"),
-                    "name": user_info.get("name"),
-                    # Ограничиваем количество для отображения
-                    "tweets": recent_tweets_for_display[:MAX_TWEETS_DISPLAY]
-                }
-                all_results_for_display.append(display_data)
-
-                end_time_user = time.time()
-                logger.info(f"Завершена обработка @{username} за {end_time_user - start_time_user:.2f} сек.")
-
-
-            except Exception as user_proc_err:
-                 logger.error(f"Ошибка при обработке пользователя @{username}: {user_proc_err}")
-                 import traceback; logger.error(traceback.format_exc())
-                 if db_connection and db_connection.is_connected():
-                      try: logger.warning(f"Попытка ROLLBACK из-за ошибки @{username}"); db_connection.rollback()
-                      except Exception as rb_err: logger.error(f"Ошибка ROLLBACK: {rb_err}")
-                 logger.info(f"Продолжаем со следующим пользователем после ошибки с @{username}")
-                 continue
-
-            # Пауза
-            pause_duration = 2
-            logger.debug(f"Пауза {pause_duration} сек...")
-            time.sleep(pause_duration)
-
-        # --- Конец цикла обработки аккаунтов ---
+            # Небольшая пауза между аккаунтами
+            time.sleep(2)
 
         end_time_total = time.time()
-        logger.info(f"\nЗавершена обработка всех {len(accounts_to_track)} аккаунтов за {end_time_total - start_time_total:.2f} сек.")
+        logger.info(f"Завершена обработка всех аккаунтов за {end_time_total - start_time_total:.2f} сек.")
 
-        # --- Отображение результатов и статистики ---
-        logger.info("\n" + "="*20 + " РЕЗУЛЬТАТЫ СБОРА " + "="*20)
-        if not all_results_for_display:
-            logger.warning(f"Не найдено свежих твитов для отображения ({HOURS_FILTER} ч).")
-            print(f"\nНе найдено твитов для отображения за последние {HOURS_FILTER} часа.")
+        logger.info("===== РЕЗУЛЬТАТЫ =====")
+        if not all_results:
+            logger.warning(f"Не найдено свежих твитов за последние {HOURS_FILTER} часа от отслеживаемых аккаунтов.")
+            print(f"\nНе найдено твитов за последние {HOURS_FILTER} часа от отслеживаемых аккаунтов.")
         else:
-            # Отображаем сводку по отфильтрованным данным
-            deps['display_results_summary'](all_results_for_display, HOURS_FILTER)
+            # Отображаем результаты
+            deps['display_results_summary'](all_results, HOURS_FILTER) # images_dir больше не нужен
 
-            # Статистика сбора (по данным для отображения)
-            stats = deps['generate_tweet_statistics'](all_results_for_display)
-            logger.info(f"Общая статистика (отображено): {stats}")
+            # Генерируем и выводим статистику
+            stats = deps['generate_tweet_statistics'](all_results)
+            logger.info(f"Общая статистика: {stats}")
 
-            # Статистика БД
-            if db_connection and db_connection.is_connected():
+            if db_connection:
                 db_stats = deps['generate_database_statistics'](db_connection)
-                logger.info(f"Статистика БД после завершения: {db_stats}")
+                logger.info(f"Статистика БД: {db_stats}")
                 print("\n--- Информация о базе данных ---")
                 if isinstance(db_stats, dict):
-                     for category, count in db_stats.items(): print(f"- {category}: {count}")
-                else: print("Не удалось получить статистику БД.")
-            elif not db_connection: print("\nСтатистика БД недоступна (работа без БД).")
-
+                     for category, count in db_stats.items():
+                         print(f"- {category}: {count}")
+                else:
+                     print("Не удалось получить статистику БД.")
 
     except KeyboardInterrupt:
-        logger.warning("Выполнение прервано пользователем (Ctrl+C)")
-        print("\nПрервано пользователем.")
-        if db_connection and db_connection.is_connected():
-             try: logger.warning("Попытка COMMIT перед выходом (Ctrl+C)..."); db_connection.commit(); logger.info("COMMIT выполнен.")
-             except Exception as final_commit_err: logger.error(f"Ошибка финального COMMIT: {final_commit_err}"); db_connection.rollback()
-
+         logger.warning("Прервано пользователем (Ctrl+C)")
+         print("\nПрервано пользователем.")
     except Exception as e:
-         logger.critical(f"Критическая ошибка в главном цикле: {e}")
-         import traceback; logger.error(traceback.format_exc())
-         print(f"\nПроизошла критическая ошибка: {e}")
-         if db_connection and db_connection.is_connected():
-              try: logger.warning("Попытка ROLLBACK из-за крит. ошибки..."); db_connection.rollback()
-              except Exception as critical_rb_err: logger.error(f"Ошибка ROLLBACK: {critical_rb_err}")
-
+         logger.critical(f"Произошла критическая ошибка в главном цикле: {e}")
+         import traceback
+         logger.error(traceback.format_exc()) # Логируем полный traceback
+         print(f"Произошла критическая ошибка: {e}")
     finally:
-        # --- Завершение работы ---
-        logger.info("--- Завершение работы скрапера ---")
-        if driver:
-            try: driver.quit(); logger.info("Браузер Chrome закрыт")
-            except Exception as e: logger.error(f"Ошибка закрытия браузера: {e}")
-        if db_connection and hasattr(db_connection, 'is_connected') and db_connection.is_connected():
-            try: db_connection.close(); logger.info("Соединение с MySQL закрыто")
-            except Exception as e: logger.error(f"Ошибка закрытия соединения с БД: {e}")
+        # Закрываем браузер и соединение с базой данных
+        logger.info("--- Завершение работы ---")
 
-        logger.info("="*30 + " ЗАВЕРШЕНО " + "="*30)
+        if driver:
+            try:
+                driver.quit()
+                logger.info("Браузер закрыт")
+            except Exception as e:
+                 logger.error(f"Ошибка при закрытии браузера: {e}")
+
+        if db_connection and hasattr(db_connection, 'is_connected') and db_connection.is_connected():
+            try:
+                db_connection.close()
+                logger.info("Соединение с базой данных закрыто")
+            except Exception as e:
+                 logger.error(f"Ошибка при закрытии соединения с БД: {e}")
+
+        logger.info("=== СКРИПТ ЗАВЕРШИЛ РАБОТУ ===")
         print("\n=== СКРИПТ ЗАВЕРШИЛ РАБОТУ ===")
+
 
 if __name__ == "__main__":
     main()

@@ -4,7 +4,7 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException, WebDriverException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
@@ -12,45 +12,41 @@ import json
 import os
 import datetime
 import re
+# BeautifulSoup и requests больше не нужны для скачивания изображений
+# import requests
+# from bs4 import BeautifulSoup
+# hashlib и urllib.parse больше не нужны для изображений
+# import hashlib
+# import urllib.parse
 import mysql.connector
-from mysql.connector import Error, errorcode
-import html
-import logging
-
-# Настройка логирования
-logger = logging.getLogger('twitter_scraper.utils')
-if not logger.handlers:
-     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+from mysql.connector import Error
 
 # Глобальная настройка отладки
 DEBUG = True
 
 # Директории для хранения данных
 CACHE_DIR = "twitter_cache"
+# IMAGES_DIR больше не нужен
+# IMAGES_DIR = "twitter_images"
 os.makedirs(CACHE_DIR, exist_ok=True)
+# os.makedirs(IMAGES_DIR, exist_ok=True) # Удалено
 
 
 def debug_print(*args, **kwargs):
-    """Функция для вывода отладочной информации, если DEBUG=True."""
+    """Функция для вывода отладочной информации"""
     if DEBUG:
-        safe_args = [repr(a) if isinstance(a, str) else str(a) for a in args]
-        safe_kwargs = {k: repr(v) if isinstance(v, str) else str(v) for k, v in kwargs.items()}
-        try:
-            print("[ОТЛАДКА]", *safe_args, **safe_kwargs)
-        except Exception as e:
-            print(f"[ОТЛАДКА ОШИБКА ВЫВОДА]: {e}")
-            try: print("[ОТЛАДКА RAW]", args, kwargs)
-            except Exception: print("[ОТЛАДКА RAW] Не удалось вывести необработанные данные.")
+        print("[ОТЛАДКА]", *args, **kwargs)
 
 
 def initialize_mysql(config):
-    """Инициализирует подключение к MySQL и создает/обновляет таблицы."""
-    # (Код без изменений)
+    """Инициализирует подключение к MySQL и создает необходимые таблицы"""
     try:
         connection = mysql.connector.connect(**config)
+
         if connection.is_connected():
-            cursor = connection.cursor(dictionary=True)
-            logger.info("Проверка/создание таблицы 'users'...")
+            cursor = connection.cursor()
+
+            # Создаем таблицу для пользователей
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -59,331 +55,655 @@ def initialize_mysql(config):
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
             """)
-            logger.info("Таблица 'users' проверена/создана.")
-            logger.info("Проверка/обновление/создание таблицы 'tweets'...")
-            try:
-                cursor.execute("DESCRIBE tweets")
-                existing_columns_info = cursor.fetchall(); existing_columns = {col['Field'] for col in existing_columns_info}; schema_changed = False
-                columns_to_add = {
-                    'original_tweet_text': "TEXT COLLATE utf8mb4_unicode_ci AFTER inserted_at",
-                    'good': "TINYINT(1) DEFAULT NULL AFTER original_tweet_text",
-                    'bad': "TINYINT(1) DEFAULT NULL AFTER good",
-                    'isChecked': "TINYINT(1) DEFAULT NULL AFTER bad"
-                }
-                for col_name, col_def in columns_to_add.items():
-                    if col_name not in existing_columns:
-                        try: cursor.execute(f"ALTER TABLE tweets ADD COLUMN {col_name} {col_def}"); logger.info(f"Добавлена колонка '{col_name}'."); schema_changed = True
-                        except Error as alter_err: logger.error(f"Ошибка добавления колонки {col_name}: {alter_err}")
-                cursor.execute("SHOW INDEX FROM tweets WHERE Key_name = 'idx_original_author'")
-                if not cursor.fetchone():
-                     try: cursor.execute("ALTER TABLE tweets ADD INDEX idx_original_author (original_author)"); logger.info("Добавлен индекс 'idx_original_author'."); schema_changed = True
-                     except Error as index_err: logger.error(f"Ошибка добавления индекса idx_original_author: {index_err}")
-                if schema_changed: connection.commit(); logger.info("Схема таблицы 'tweets' обновлена.")
-            except mysql.connector.Error as e:
-                if e.errno == errorcode.ER_NO_SUCH_TABLE:
-                    logger.info("Таблица 'tweets' не найдена, создаем новую.")
-                    cursor.execute("""
-                    CREATE TABLE tweets (
-                        id INT AUTO_INCREMENT PRIMARY KEY, tweet_id VARCHAR(255) UNIQUE, user_id INT,
-                        tweet_text TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci, created_at DATETIME, url VARCHAR(255),
-                        likes INT DEFAULT 0, retweets INT DEFAULT 0, replies INT DEFAULT 0, is_retweet BOOLEAN DEFAULT FALSE,
-                        original_author VARCHAR(255), inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        original_tweet_text TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
-                        good TINYINT(1) DEFAULT NULL, bad TINYINT(1) DEFAULT NULL, isChecked TINYINT(1) DEFAULT NULL,
-                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, INDEX idx_created_at (created_at),
-                        INDEX idx_user_id (user_id), INDEX idx_original_author (original_author)
-                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;""")
-                    logger.info("Таблица 'tweets' создана."); connection.commit()
-                else: logger.error(f"Ошибка проверки/создания таблицы tweets: {e}"); raise e
-            finally:
-                 if cursor: cursor.close()
-            logger.info("База данных успешно инициализирована.")
+
+            # Создаем таблицу для твитов
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tweets (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                tweet_id VARCHAR(255) UNIQUE,
+                user_id INT,
+                tweet_text TEXT,
+                created_at DATETIME,
+                url VARCHAR(255),
+                likes INT DEFAULT 0,
+                retweets INT DEFAULT 0,
+                replies INT DEFAULT 0,
+                is_retweet BOOLEAN DEFAULT FALSE,
+                original_author VARCHAR(255),
+                inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                INDEX idx_created_at (created_at),
+                INDEX idx_user_id (user_id)
+            ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            """)
+
+            # --- Удалено создание таблиц images, articles, tweet_links, article_links ---
+            # # Создаем таблицу для изображений (УДАЛЕНО)
+            # cursor.execute("""
+            # CREATE TABLE IF NOT EXISTS images (
+            #     id INT AUTO_INCREMENT PRIMARY KEY,
+            #     tweet_id INT,
+            #     image_url VARCHAR(1024),
+            #     local_path VARCHAR(1024),
+            #     image_hash VARCHAR(32),
+            #     FOREIGN KEY (tweet_id) REFERENCES tweets(id) ON DELETE CASCADE,
+            #     INDEX idx_tweet_id (tweet_id),
+            #     INDEX idx_image_hash (image_hash)
+            # ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            # """)
+            #
+            # # Создаем таблицу для статей (УДАЛЕНО)
+            # cursor.execute("""
+            # CREATE TABLE IF NOT EXISTS articles (
+            #     id INT AUTO_INCREMENT PRIMARY KEY,
+            #     tweet_id INT,
+            #     article_url VARCHAR(1024),
+            #     title TEXT,
+            #     author VARCHAR(255),
+            #     published_date VARCHAR(255),
+            #     source_domain VARCHAR(255),
+            #     content LONGTEXT,
+            #     inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            #     FOREIGN KEY (tweet_id) REFERENCES tweets(id) ON DELETE CASCADE,
+            #     INDEX idx_tweet_id (tweet_id),
+            #     INDEX idx_source_domain (source_domain)
+            # ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            # """)
+            #
+            # # Создаем таблицу для ссылок из твитов (УДАЛЕНО)
+            # cursor.execute("""
+            # CREATE TABLE IF NOT EXISTS tweet_links (
+            #     id INT AUTO_INCREMENT PRIMARY KEY,
+            #     tweet_id INT,
+            #     url VARCHAR(1024),
+            #     link_type ENUM('external', 'mention', 'hashtag', 'media'),
+            #     inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            #     FOREIGN KEY (tweet_id) REFERENCES tweets(id) ON DELETE CASCADE,
+            #     INDEX idx_tweet_id (tweet_id),
+            #     INDEX idx_link_type (link_type)
+            # ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            # """)
+            #
+            # # Создаем таблицу для ссылок из статей (УДАЛЕНО)
+            # cursor.execute("""
+            # CREATE TABLE IF NOT EXISTS article_links (
+            #     id INT AUTO_INCREMENT PRIMARY KEY,
+            #     article_id INT,
+            #     url VARCHAR(1024),
+            #     inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            #     FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE,
+            #     INDEX idx_article_id (article_id)
+            # ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            # """)
+
+            connection.commit()
+            debug_print("База данных успешно инициализирована (таблицы users, tweets)")
             return connection
-    except Error as e: logger.error(f"Ошибка подключения/инициализации MySQL: {e}"); return None
+
+    except Error as e:
+        print(f"Ошибка при подключении к MySQL: {e}")
+        return None
 
 
 def save_user_to_db(connection, username, name):
-    """Сохраняет или обновляет пользователя в базе данных. НЕ ДЕЛАЕТ COMMIT."""
-    # (Код без изменений)
-    if not connection or not connection.is_connected(): logger.error("Нет подключения к БД для сохранения пользователя."); return None
-    cursor = None
-    try:
-        cursor = connection.cursor(dictionary=True)
-        insert_query = """
-            INSERT INTO users (username, name) VALUES (%s, %s)
-            ON DUPLICATE KEY UPDATE name = COALESCE(VALUES(name), name), last_updated = CURRENT_TIMESTAMP
-        """
-        cursor.execute(insert_query, (username, name))
-        user_id = cursor.lastrowid
-        if user_id == 0:
-            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
-            result = cursor.fetchone()
-            if result: user_id = result['id']
-            else: logger.error(f"Не удалось получить ID для {username} после ON DUPLICATE KEY UPDATE"); return None
-        debug_print(f"Пользователь @{username} подготовлен (ID: {user_id}). Commit будет позже.")
-        return user_id
-    except Error as e: logger.error(f"Ошибка сохранения пользователя {username}: {e}"); return None
-    finally:
-         if cursor:
-             try: cursor.close()
-             except: pass
-
-
-def save_tweets_batch_to_db(connection, list_of_tweets):
-    """Сохраняет пакет твитов в базу данных. НЕ ДЕЛАЕТ COMMIT."""
-    # (Код без изменений)
-    if not connection or not connection.is_connected(): logger.error("Нет подключения к БД для пакетного сохранения."); return None
-    if not list_of_tweets: logger.info("Нет твитов для пакетного сохранения."); return 0
-    cursor = None; prepared_data = []; processed_count = 0
+    """Сохраняет или обновляет пользователя в базе данных"""
     try:
         cursor = connection.cursor()
-        logger.info(f"Подготовка {len(list_of_tweets)} твитов для пакетной вставки/обновления...")
-        for tweet_data in list_of_tweets:
-            db_user_id = tweet_data.get('retweeting_user_id') if tweet_data.get('is_retweet') else tweet_data.get('author_user_id')
-            tweet_id_val = tweet_data.get("tweet_id")
-            if not tweet_id_val: logger.warning(f"Пропуск твита без tweet_id в пакете. URL: {tweet_data.get('url', 'N/A')}"); continue
-            stats = tweet_data.get("stats", {}); created_at = parse_twitter_date(tweet_data.get("created_at", ""))
-            created_at_str = created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else None
-            tweet_text_str = tweet_data.get("text", "") or ""; original_author_str = tweet_data.get("original_author")
-            is_retweet_flag = tweet_data.get("is_retweet", False); url_to_save = tweet_data.get("url")
-            prepared_data.append((
-                tweet_id_val, db_user_id, tweet_text_str, created_at_str, url_to_save,
-                stats.get("likes", 0), stats.get("retweets", 0), stats.get("replies", 0),
-                is_retweet_flag, original_author_str
-            ))
-        if not prepared_data: logger.warning("После подготовки не осталось данных для пакетной вставки."); return 0
-        sql = """
-            INSERT INTO tweets (
-                tweet_id, user_id, tweet_text, created_at, url,
-                likes, retweets, replies, is_retweet, original_author
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                likes = GREATEST(likes, VALUES(likes)),
-                retweets = GREATEST(retweets, VALUES(retweets)),
-                replies = GREATEST(replies, VALUES(replies))
-        """
-        logger.info(f"Выполнение executemany для {len(prepared_data)} записей...")
-        start_time = time.time()
-        cursor.executemany(sql, prepared_data)
-        end_time = time.time()
-        processed_count = cursor.rowcount
-        logger.info(f"Executemany завершен за {end_time - start_time:.2f} сек. Затронуто строк: {processed_count}")
-        return processed_count
-    except Error as e: logger.error(f"Ошибка MySQL при пакетном сохранении: {e}"); return None
-    except Exception as e: logger.error(f"Неожиданная ошибка при пакетном сохранении: {e}"); import traceback; logger.error(traceback.format_exc()); return None
-    finally:
-         if cursor:
-              try: cursor.close()
-              except Exception as cur_close_err: logger.warning(f"Не удалось закрыть курсор: {cur_close_err}")
+
+        # Проверяем, существует ли пользователь
+        cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+        result = cursor.fetchone()
+
+        if result:
+            # Обновляем имя, если пользователь существует
+            user_id = result[0]
+            cursor.execute("UPDATE users SET name = %s WHERE id = %s", (name, user_id))
+        else:
+            # Добавляем нового пользователя
+            cursor.execute("INSERT INTO users (username, name) VALUES (%s, %s)", (username, name))
+            user_id = cursor.lastrowid
+
+        connection.commit()
+        return user_id
+
+    except Error as e:
+        print(f"Ошибка при сохранении пользователя {username}: {e}")
+        return None
 
 
-# --- ИСПРАВЛЕННАЯ ФУНКЦИЯ ---
-def parse_twitter_date(date_str):
-    """Парсит дату из различных форматов Twitter"""
-    if not date_str: return None
-    parsed_dt = None
-    try: # Внешний try для общих ошибок парсинга
-        # Попытка 1: Стандартный ISO формат с Z
-        if isinstance(date_str, str) and "Z" in date_str and "T" in date_str:
-            try:
-                parsed_dt = datetime.datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                # --- ИСПРАВЛЕНИЕ: Отделяем проверку и return ---
-                if parsed_dt.tzinfo is None or parsed_dt.tzinfo.utcoffset(parsed_dt) != datetime.timedelta(0):
-                     parsed_dt = parsed_dt.replace(tzinfo=datetime.timezone.utc)
-                return parsed_dt
-                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-            except ValueError: pass
-
-        # Попытка 2: Стандартный ISO формат с T и смещением
-        if isinstance(date_str, str) and "T" in date_str and ('+' in date_str.split('T')[1] or '-' in date_str.split('T')[1]):
-            try:
-                parsed_dt = datetime.datetime.fromisoformat(date_str)
-                # --- ИСПРАВЛЕНИЕ: Отделяем проверку и return ---
-                if parsed_dt.tzinfo is None:
-                     parsed_dt = parsed_dt.replace(tzinfo=datetime.timezone.utc)
-                elif parsed_dt.tzinfo.utcoffset(parsed_dt) != datetime.timedelta(0):
-                     parsed_dt = parsed_dt.astimezone(datetime.timezone.utc)
-                return parsed_dt
-                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-            except ValueError: pass
-
-        # Попытка 3: Формат из старого API Twitter
-        if isinstance(date_str, str):
-             fmt_api = "%a %b %d %H:%M:%S %z %Y"
-             try:
-                 parsed_dt = datetime.datetime.strptime(date_str, fmt_api)
-                 # --- ИСПРАВЛЕНИЕ: Отделяем проверку и return ---
-                 if parsed_dt.tzinfo is None or parsed_dt.tzinfo.utcoffset(parsed_dt) != datetime.timedelta(0):
-                     parsed_dt = parsed_dt.astimezone(datetime.timezone.utc)
-                 return parsed_dt
-                 # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-             except ValueError: pass
-
-        # Попытка 4: Другие распространенные форматы без явной TZ
-        formats = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"]
-        if isinstance(date_str, str):
-            for fmt in formats:
-                try:
-                    parsed_dt = datetime.datetime.strptime(date_str, fmt)
-                    # --- ИСПРАВЛЕНИЕ: Отделяем присваивание и return ---
-                    parsed_dt = parsed_dt.replace(tzinfo=datetime.timezone.utc)
-                    return parsed_dt
-                    # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-                except ValueError: continue
-
-    except Exception as e:
-        debug_print(f"Общая ошибка парсинга даты '{date_str}': {e}")
-
-    # Попытка 5: Резервные варианты
+def save_tweet_to_db(connection, user_id, tweet_data):
+    """Сохраняет твит в базу данных (без изображений и ссылок)"""
     try:
-        # ISO формат с миллисекундами и Z
-        if isinstance(date_str, str) and "T" in date_str and "." in date_str and date_str.endswith("Z"):
-            try:
-                base_date_str = date_str.split(".")[0]
-                parsed_dt = datetime.datetime.fromisoformat(base_date_str)
-                # --- ИСПРАВЛЕНИЕ: Отделяем присваивание и return ---
-                parsed_dt = parsed_dt.replace(tzinfo=datetime.timezone.utc)
-                return parsed_dt
-                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-            except ValueError: pass
+        cursor = connection.cursor()
 
-        # Если передали числовой timestamp
-        if isinstance(date_str, (int, float)):
-            try:
-                # --- ИСПРАВЛЕНИЕ: Отделяем присваивание и return ---
-                parsed_dt = datetime.datetime.fromtimestamp(int(date_str), tz=datetime.timezone.utc)
-                return parsed_dt
-                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-            except (ValueError, OSError): pass
+        # Проверяем, существует ли твит (по URL или ID)
+        tweet_id = tweet_data.get("url", "").split("/")[-1] if tweet_data.get("url") else None
 
+        if not tweet_id:
+            print("Пропускаем твит без идентификатора")
+            return None
+
+        cursor.execute("SELECT id FROM tweets WHERE tweet_id = %s", (tweet_id,))
+        result = cursor.fetchone()
+
+        if result:
+            # Твит уже существует
+            tweet_db_id = result[0]
+            # Обновляем статистику
+            cursor.execute("""
+                UPDATE tweets
+                SET likes = %s, retweets = %s, replies = %s
+                WHERE id = %s
+                """,
+                           (tweet_data.get("stats", {}).get("likes", 0),
+                            tweet_data.get("stats", {}).get("retweets", 0),
+                            tweet_data.get("stats", {}).get("replies", 0),
+                            tweet_db_id))
+        else:
+            # Создаем новый твит
+            created_at = parse_twitter_date(tweet_data.get("created_at", ""))
+            created_at_str = created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else None
+
+            cursor.execute("""
+                INSERT INTO tweets
+                (tweet_id, user_id, tweet_text, created_at, url, likes, retweets, replies, is_retweet, original_author)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                           (tweet_id,
+                            user_id,
+                            tweet_data.get("text", ""),
+                            created_at_str,
+                            tweet_data.get("url", ""),
+                            tweet_data.get("stats", {}).get("likes", 0),
+                            tweet_data.get("stats", {}).get("retweets", 0),
+                            tweet_data.get("stats", {}).get("replies", 0),
+                            tweet_data.get("is_retweet", False),
+                            tweet_data.get("original_author", None)))
+
+            tweet_db_id = cursor.lastrowid
+
+        connection.commit()
+
+        # --- Удалено сохранение изображений ---
+        # # Сохраняем изображения
+        # for image_path in tweet_data.get("images", []):
+        #     save_image_to_db(connection, tweet_db_id, image_path)
+
+        return tweet_db_id
+
+    except Error as e:
+        print(f"Ошибка при сохранении твита: {e}")
+        return None
+
+# --- Функция save_image_to_db удалена ---
+# def save_image_to_db(connection, tweet_db_id, image_path, image_url=None):
+#     """Сохраняет информацию об изображении в базу данных"""
+#     # ... (код функции удален) ...
+
+
+def parse_twitter_date(date_str):
+    """
+    Парсит дату из различных форматов Twitter
+    Возвращает объект datetime с учетом часового пояса
+    """
+    if not date_str:
+        return None
+
+    # Пробуем различные форматы даты
+    try:
+        # Формат ISO с Z (UTC)
+        if "Z" in date_str:
+            return datetime.datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+
+        # Формат ISO без Z
+        if "T" in date_str and ('+' in date_str or '-' in date_str.split('T')[1]):
+            return datetime.datetime.fromisoformat(date_str)
+
+        # Стандартный формат Twitter "Wed Apr 23 15:24:13 +0000 2014"
+        formats = [
+            "%a %b %d %H:%M:%S %z %Y",  # Стандартный Twitter
+            "%Y-%m-%d %H:%M:%S %z",  # Вариант ISO с пробелом
+            "%Y-%m-%dT%H:%M:%S",  # ISO без часового пояса
+            "%Y-%m-%d"  # Только дата
+        ]
+
+        for fmt in formats:
+            try:
+                dt = datetime.datetime.strptime(date_str, fmt)
+                # Если нет часового пояса, предполагаем UTC
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=datetime.timezone.utc)
+                return dt
+            except ValueError:
+                continue
     except Exception as e:
-        debug_print(f"Ошибка в резервных вариантах парсинга даты '{date_str}': {e}")
+        debug_print(f"Ошибка при парсинге даты '{date_str}': {e}")
 
-    # Если ни один формат не подошел
+    # Если не удалось распарсить дату, пытаемся интерпретировать её вручную
+    try:
+        # Самый распространённый формат Twitter для JavaScript: "2023-04-15T12:34:56.000Z"
+        if "T" in date_str and "." in date_str and date_str.endswith("Z"):
+            parts = date_str.split(".")
+            date_without_ms = parts[0]
+            dt = datetime.datetime.fromisoformat(date_without_ms)
+            return dt.replace(tzinfo=datetime.timezone.utc)
+
+        # Проверяем, является ли дата временной меткой Unix
+        if date_str.isdigit():
+            return datetime.datetime.fromtimestamp(int(date_str), tz=datetime.timezone.utc)
+    except Exception as e:
+        debug_print(f"Дополнительная ошибка при парсинге даты '{date_str}': {e}")
+
+    # В случае неудачи, возвращаем текущее время
     now = datetime.datetime.now(datetime.timezone.utc)
-    debug_print(f"Не удалось разобрать дату '{date_str}' ни одним из способов. Используем текущее время.")
+    debug_print(f"Не удалось разобрать дату '{date_str}'. Используем текущее время.")
     return now
 
 
 def filter_recent_tweets(tweets, hours=24):
     """Фильтрует твиты, оставляя только опубликованные за последние N часов"""
-    # (Код без изменений)
-    if not tweets: return []
-    current_time = datetime.datetime.now(datetime.timezone.utc); cutoff_time = current_time - datetime.timedelta(hours=hours)
-    recent_tweets = []; processed_ids = set()
+    if not tweets:
+        return []
+
+    current_time = datetime.datetime.now(datetime.timezone.utc)
+    cutoff_time = current_time - datetime.timedelta(hours=hours)
+
+    recent_tweets = []
+
     for tweet in tweets:
-        if not isinstance(tweet, dict) or not tweet.get("created_at"): logger.warning(f"Пропуск некорректного твита в фильтре: {tweet}"); continue
-        tweet_id = tweet.get("tweet_id")
-        if not tweet_id: logger.warning(f"Пропуск твита без ID в фильтре: {tweet.get('url')}"); continue
-        if tweet_id in processed_ids: logger.debug(f"Пропуск дубликата tweet_id {tweet_id} в фильтре."); continue
+        if not tweet.get("created_at"):
+            continue
+
         try:
+            # Преобразуем строку даты в datetime объект
             tweet_time = parse_twitter_date(tweet["created_at"])
-            if not tweet_time: logger.warning(f"Не удалось распарсить дату для твита {tweet_id}, пропускаем."); continue
-            if tweet_time.tzinfo is None: tweet_time = tweet_time.replace(tzinfo=datetime.timezone.utc)
-            elif tweet_time.tzinfo.utcoffset(tweet_time) != datetime.timedelta(0): tweet_time = tweet_time.astimezone(datetime.timezone.utc)
-            if tweet_time >= cutoff_time: recent_tweets.append(tweet); processed_ids.add(tweet_id)
-        except Exception as e: logger.error(f"Ошибка обработки даты твита {tweet_id} ({tweet.get('url', '')}): {e}")
-    logger.info(f"Фильтр: найдено {len(recent_tweets)} твитов за последние {hours} часов из {len(tweets)}.")
+
+            if not tweet_time:
+                continue
+
+            # Проверяем, что твит опубликован в течение указанного периода
+            if tweet_time >= cutoff_time:
+                recent_tweets.append(tweet)
+                debug_print(
+                    f"Свежий твит: {tweet_time.isoformat()}, {(current_time - tweet_time).total_seconds() / 3600:.1f}ч назад")
+            else:
+                debug_print(
+                    f"Старый твит: {tweet_time.isoformat()}, {(current_time - tweet_time).total_seconds() / 3600:.1f}ч назад")
+        except Exception as e:
+            debug_print(f"Ошибка при обработке даты твита: {e}")
+
     return recent_tweets
 
 
 def format_time_ago(iso_time_str):
-    """Форматирует время в человеко-читаемый вид"""
-    # (Код без изменений)
+    """Форматирует время в человеко-читаемый вид (сколько времени прошло)"""
     try:
-        if not iso_time_str: return "неизвестно"
-        tweet_time = parse_twitter_date(iso_time_str);
-        if not tweet_time: return iso_time_str
-        if tweet_time.tzinfo is None: tweet_time = tweet_time.replace(tzinfo=datetime.timezone.utc)
-        elif tweet_time.tzinfo.utcoffset(tweet_time) != datetime.timedelta(0): tweet_time = tweet_time.astimezone(datetime.timezone.utc)
-        now = datetime.datetime.now(datetime.timezone.utc); diff = now - tweet_time
-        if diff.days > 0: return f"{diff.days} д. назад"
-        hours = diff.seconds // 3600; minutes = (diff.seconds % 3600) // 60
-        if hours > 0: return f"{hours} ч. назад"
-        if minutes > 0: return f"{minutes} мин. назад"
+        if not iso_time_str:
+            return "неизвестно"
+
+        tweet_time = parse_twitter_date(iso_time_str)
+        if not tweet_time:
+            return iso_time_str
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        diff = now - tweet_time
+
+        # Форматируем разницу во времени
+        if diff.days > 0:
+            return f"{diff.days} д. назад"
+        hours = diff.seconds // 3600
+        if hours > 0:
+            return f"{hours} ч. назад"
+        minutes = (diff.seconds % 3600) // 60
+        if minutes > 0:
+            return f"{minutes} мин. назад"
         return "только что"
     except Exception:
-        if iso_time_str and isinstance(iso_time_str, str) and "T" in iso_time_str:
-             try: return iso_time_str.split("T")[1][:8]
-             except: pass
-        return str(iso_time_str)
+        # Если не удалось форматировать, возвращаем оригинальное время
+        if iso_time_str and "T" in iso_time_str:
+            return iso_time_str.split("T")[1][:8]
+        return iso_time_str
 
 
 def initialize_browser(chrome_profile_path=None):
     """Инициализирует и возвращает браузер Chrome"""
-    # (Код без изменений)
-    options = Options(); options.add_argument("--window-size=1920,1080")
+    # Настройка Selenium
+    options = Options()
+    options.add_argument("--window-size=1920,1080")
+
+    # Если указан путь к профилю Chrome, используем его
     if chrome_profile_path:
-        abs_profile_path = os.path.abspath(chrome_profile_path)
-        if os.path.exists(abs_profile_path) and os.path.isdir(abs_profile_path): options.add_argument(f"user-data-dir={abs_profile_path}"); logger.info(f"Используется профиль Chrome: {abs_profile_path}")
-        else: logger.warning(f"Профиль Chrome не найден: {abs_profile_path}. Используется временный."); chrome_profile_path = None
-    else: logger.info("Профиль Chrome не указан, используется временный.")
-    options.add_argument("--no-sandbox"); options.add_argument("--disable-dev-shm-usage"); options.add_argument("--disable-gpu"); options.add_argument("--disable-extensions")
-    options.add_argument("--disable-blink-features=AutomationControlled"); options.add_experimental_option("excludeSwitches", ["enable-automation"]); options.add_experimental_option("useAutomationExtension", False)
-    options.add_argument("--log-level=3"); options.add_argument("--silent")
-    user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-    options.add_argument(f'user-agent={user_agent}'); logger.info(f"Установлен User-Agent: {user_agent}")
+        if os.path.exists(chrome_profile_path):
+            options.add_argument(f"user-data-dir={chrome_profile_path}")
+            print(f"Используется профиль Chrome: {chrome_profile_path}")
+        else:
+            print(f"ВНИМАНИЕ: Указанный профиль Chrome не найден: {chrome_profile_path}")
+            print("Будет использован временный профиль")
+
+    # Дополнительные настройки для стабильности
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-extensions")
+
+    # Добавляем обход обнаружения автоматизации
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+
     try:
         driver = webdriver.Chrome(options=options)
+        # Обход обнаружения Selenium
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
-        driver.set_page_load_timeout(60)
-        logger.info("Браузер Chrome успешно инициализирован.")
+        driver.set_page_load_timeout(60)  # Увеличенный таймаут загрузки страницы
+
+        # Дополнительные настройки для улучшения стабильности
+        driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+            "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+
         return driver
-    except Exception as e: logger.critical(f"Ошибка инициализации браузера: {e}"); import traceback; logger.error(traceback.format_exc()); return None
+    except Exception as e:
+        print(f"Ошибка при инициализации браузера: {e}")
+        return None
 
 
 def manual_auth_with_prompt(driver):
-    """Открывает страницу авторизации Twitter и ждет подтверждения пользователя"""
-    # (Код без изменений)
-    if not driver: logger.error("Браузер не инициализирован, авторизация невозможна."); return False
+    """Открывает страницу авторизации Twitter и ждет, пока пользователь не нажмет Enter в консоли"""
     try:
-        print("\n" + "="*20 + " АВТОРИЗАЦИЯ В TWITTER " + "="*20); print("Открывается страница входа Twitter/X..."); print("ПОЖАЛУЙСТА:\n1. Войдите в свой аккаунт.\n2. Убедитесь, что видите ленту.\n3. Вернитесь сюда и нажмите Enter."); print("="*60)
-        driver.get("https://twitter.com/")
-        input("\n>>> Нажмите Enter после завершения авторизации...")
+        print("\n=== АВТОРИЗАЦИЯ В TWITTER ===")
+        print("Сейчас откроется страница входа в Twitter.")
+        print("Пожалуйста, войдите в свой аккаунт, и после завершения авторизации нажмите Enter в этой консоли.")
+
+        # Открываем страницу авторизации
+        driver.get("https://twitter.com/login")
+
+        # Ждем, пока пользователь нажмет Enter
+        input("\nПосле завершения авторизации нажмите Enter для продолжения...")
+
+        # Проверяем, авторизован ли пользователь
+        if "Log in" in driver.page_source and "Sign up" in driver.page_source:
+            print("ВНИМАНИЕ: Признаки авторизации не обнаружены. Продолжаем с текущим состоянием.")
+            return False
+        else:
+            print("Признаки авторизации обнаружены. Продолжаем работу.")
+            return True
+    except Exception as e:
+        print(f"Ошибка при авторизации: {e}")
+        return False
+
+# --- Функция download_image удалена ---
+# def download_image(url, username):
+#     """Скачивает изображение и сохраняет его в папку с изображениями"""
+#     # ... (код функции удален) ...
+
+# --- Функция extract_images_from_tweet удалена ---
+# def extract_images_from_tweet(tweet_element, username):
+#     """Извлекает изображения из твита и скачивает их"""
+#     # ... (код функции удален) ...
+
+
+def extract_retweet_info(tweet_element):
+    """Улучшенная функция для извлечения информации о ретвите"""
+    # Эта функция остается, так как она не связана с изображениями/ссылками/статьями
+    result = {
+        "is_retweet": False,
+        "original_author": None
+    }
+
+    try:
+        # Помечаем начало проверки для отладки
+        debug_print("Начало проверки на ретвит...") # Используем debug_print
+
+        # МЕТОД 1: Проверка по специфическим тегам для ретвитов
+        retweet_indicators = [
+            "retweeted", "reposted", "ретвитнул", "ретвитнула",
+            "повторно опубликовал", "повторно опубликовала",
+            "quote", "цитирует", "отметил", "отметила"
+        ]
+
         try:
-            WebDriverWait(driver, 10).until(EC.any_of(EC.presence_of_element_located((By.CSS_SELECTOR, 'a[data-testid="AppTabBar_Home_Link"]')), EC.presence_of_element_located((By.CSS_SELECTOR, '[data-testid="SideNav_AccountSwitcher_Button"]'))))
-            logger.info("Признаки авторизации обнаружены."); print("Авторизация подтверждена."); return True
-        except TimeoutException:
-            logger.warning("Не удалось автоматически подтвердить авторизацию."); print("\nВНИМАНИЕ: Не удалось автоматически подтвердить вход.")
-            cont = input("Продолжить выполнение скрипта? (да/нет): ")
-            return cont.lower() in ['да', 'yes', 'y', 'д']
-    except WebDriverException as e: logger.error(f"Ошибка WebDriver во время авторизации: {e}"); print(f"Ошибка браузера: {e}"); return False
-    except Exception as e: logger.error(f"Неожиданная ошибка при ручной авторизации: {e}"); print(f"Ошибка авторизации: {e}"); return False
+            social_context = tweet_element.find_elements(By.CSS_SELECTOR, '[data-testid="socialContext"]')
+            if social_context:
+                context_text = social_context[0].text.lower()
+                debug_print(f"Найден socialContext: '{context_text}'") # Используем debug_print
+
+                for indicator in retweet_indicators:
+                    if indicator.lower() in context_text:
+                        debug_print(f"Найден индикатор ретвита: '{indicator}'") # Используем debug_print
+                        result["is_retweet"] = True
+                        break
+        except Exception as e:
+            debug_print(f"Ошибка при проверке socialContext: {e}") # Используем debug_print
+
+        # МЕТОД 2: Поиск иконки ретвита
+        if not result["is_retweet"]:
+            try:
+                retweet_icon = tweet_element.find_elements(By.CSS_SELECTOR, '[data-testid="socialContext"] svg')
+                if retweet_icon:
+                    debug_print("Найдена иконка в socialContext") # Используем debug_print
+                    result["is_retweet"] = True
+            except Exception as e:
+                debug_print(f"Ошибка при поиске иконки ретвита: {e}") # Используем debug_print
+
+        # МЕТОД 3: Проверка на наличие двух разных имен пользователей в твите
+        if not result["is_retweet"]:
+            try:
+                user_links = tweet_element.find_elements(By.CSS_SELECTOR, 'a[role="link"][href*="/"]')
+                usernames = set()
+
+                for link in user_links:
+                    href = link.get_attribute('href')
+                    if href and '/status/' not in href:
+                        username = href.split('/')[-1]
+                        if username and len(username) > 1:
+                            usernames.add(username)
+
+                debug_print(f"Найдено уникальных имен пользователей: {len(usernames)}") # Используем debug_print
+                if len(usernames) >= 2:
+                    debug_print("Обнаружено несколько имен пользователей, возможно это ретвит") # Используем debug_print
+                    result["is_retweet"] = True
+            except Exception as e:
+                debug_print(f"Ошибка при проверке нескольких имен пользователей: {e}") # Используем debug_print
+
+        # Если определили, что это ретвит, ищем оригинального автора
+        if result["is_retweet"]:
+            try:
+                # МЕТОД 1: Поиск автора через socialContext
+                social_context_links = tweet_element.find_elements(By.CSS_SELECTOR, '[data-testid="socialContext"] a')
+                if social_context_links:
+                    for link in social_context_links:
+                        href = link.get_attribute('href')
+                        if href and '/status/' not in href:
+                            original_author = href.split('/')[-1]
+                            debug_print(f"Найден оригинальный автор через socialContext: {original_author}") # Используем debug_print
+                            result["original_author"] = original_author
+                            break
+
+                # МЕТОД 2: Поиск по User-Name элементам
+                if not result["original_author"]:
+                    user_name_elements = tweet_element.find_elements(By.CSS_SELECTOR,
+                                                                     '[data-testid="User-Name"] a[role="link"]')
+                    if len(user_name_elements) >= 2:
+                        href = user_name_elements[1].get_attribute('href')
+                        if href and '/status/' not in href:
+                            original_author = href.split('/')[-1]
+                            debug_print(f"Найден оригинальный автор через User-Name: {original_author}") # Используем debug_print
+                            result["original_author"] = original_author
+
+                # МЕТОД 3: Поиск имен пользователей в порядке появления
+                if not result["original_author"]:
+                    user_links = tweet_element.find_elements(By.CSS_SELECTOR, 'a[role="link"][href*="/"]')
+                    usernames = []
+
+                    for link in user_links:
+                        href = link.get_attribute('href')
+                        if href and '/status/' not in href:
+                            username = href.split('/')[-1]
+                            if username and len(username) > 1 and username not in usernames:
+                                usernames.append(username)
+
+                    debug_print(f"Найдено имен пользователей в порядке: {usernames}") # Используем debug_print
+                    if len(usernames) >= 2:
+                        result["original_author"] = usernames[1]
+                        debug_print(f"Использовано второе имя как оригинальный автор: {result['original_author']}") # Используем debug_print
+            except Exception as e:
+                debug_print(f"Ошибка при поиске оригинального автора: {e}") # Используем debug_print
+
+        debug_print(f"Результат определения ретвита: {result}") # Используем debug_print
+        return result
+
+    except Exception as e:
+        debug_print(f"Общая ошибка при определении ретвита: {e}") # Используем debug_print
+        return result
 
 
 def extract_tweet_stats(tweet_element):
     """Извлекает статистику твита (лайки, ретвиты, ответы)"""
-    # (Код без изменений)
+    # Эта функция остается, так как она не связана с изображениями/ссылками/статьями
     stats = {"likes": 0, "retweets": 0, "replies": 0}
-    def parse_stat_value(text):
-        if not isinstance(text, str): return 0
-        text_upper = text.upper(); text_cleaned = text_upper.replace(',', ''); value_match = re.search(r'([\d.]+)', text_cleaned)
-        if not value_match: return 0; value_str = value_match.group(1)
-        try:
-            value = float(value_str); multiplier = 1
-            if 'K' in text_cleaned: multiplier = 1000
-            elif 'M' in text_cleaned: multiplier = 1000000
-            return int(value * multiplier)
-        except ValueError: return 0
+
+    # МЕТОД 0: "Старая надежная" техника извлечения replies
     try:
-        stat_buttons_container = tweet_element.find_element(By.CSS_SELECTOR, 'div[role="group"]')
-        buttons = stat_buttons_container.find_elements(By.CSS_SELECTOR, 'button[data-testid]')
+        reply_elements = tweet_element.find_elements(By.CSS_SELECTOR, 'div[data-testid="reply"]')
+        debug_print(f"Найдено элементов reply: {len(reply_elements)}") # Используем debug_print
+
+        for reply_el in reply_elements:
+            all_text = reply_el.text
+            debug_print(f"Текст элемента reply: '{all_text}'") # Используем debug_print
+
+            numbers = re.findall(r'\d+', all_text)
+            if numbers:
+                stats["replies"] = int(numbers[0])
+                debug_print(f"МЕТОД 0: Извлечено replies: {stats['replies']}") # Используем debug_print
+    except Exception as e:
+        debug_print(f"Ошибка в методе 0: {e}") # Используем debug_print
+
+    # МЕТОД 1: Прямой поиск по data-testid
+    for stat_type, stat_key in [("reply", "replies"), ("retweet", "retweets"), ("like", "likes")]:
+        try:
+            selector = f'div[data-testid="{stat_type}"]'
+            elements = tweet_element.find_elements(By.CSS_SELECTOR, selector)
+            debug_print(f"Найдено {len(elements)} элементов с селектором '{selector}'") # Используем debug_print
+
+            for element in elements:
+                full_text = element.text
+                debug_print(f"Текст элемента {stat_type}: '{full_text}'") # Используем debug_print
+
+                if full_text:
+                    numbers = re.findall(r'(\d+)', full_text)
+                    if numbers:
+                        value = int(numbers[0])
+                        stats[stat_key] = value
+                        debug_print(f"МЕТОД 1: Извлечено {stat_key}: {value}") # Используем debug_print
+                        continue
+
+                spans = element.find_elements(By.TAG_NAME, 'span')
+                for span in spans:
+                    text = span.text.strip()
+                    if text and re.search(r'\d', text):
+                        numbers = re.findall(r'(\d+)', text)
+                        if numbers:
+                            value = int(numbers[0])
+                            stats[stat_key] = value
+                            debug_print(f"МЕТОД 1 (spans): Извлечено {stat_key}: {value}") # Используем debug_print
+                            break
+        except Exception as e:
+            debug_print(f"Ошибка при извлечении {stat_type}: {e}") # Используем debug_print
+
+    # МЕТОД 2: Поиск в aria-label
+    try:
+        buttons = tweet_element.find_elements(By.CSS_SELECTOR, 'div[role="button"][aria-label]')
+        debug_print(f"Найдено {len(buttons)} кнопок с aria-label") # Используем debug_print
+
         for button in buttons:
             try:
-                test_id = button.get_attribute('data-testid').lower(); aria_label = button.get_attribute('aria-label') or ""; text_content = button.text.strip()
-                value = 0; aria_numbers = re.findall(r'([\d,.]+)', aria_label)
-                if aria_numbers: value = parse_stat_value(aria_label)
-                elif text_content: value = parse_stat_value(text_content)
-                if value > 0:
-                    stat_key = None
-                    if "reply" in test_id or "ответ" in aria_label.lower() or "comment" in aria_label.lower(): stat_key = "replies"
-                    elif "retweet" in test_id or "ретвит" in aria_label.lower() or "repost" in aria_label.lower(): stat_key = "retweets"
-                    elif "like" in test_id or "нрав" in aria_label.lower() or "лайк" in aria_label.lower(): stat_key = "likes"
-                    if stat_key: stats[stat_key] = max(stats.get(stat_key, 0), value)
-            except StaleElementReferenceException: logger.warning("Кнопка статистики устарела."); continue
+                aria_label = button.get_attribute('aria-label')
+                if not aria_label:
+                    continue
+
+                debug_print(f"Проверяем aria-label: '{aria_label}'") # Используем debug_print
+
+                numbers = re.findall(r'(\d+)', aria_label)
+                if not numbers:
+                    continue
+
+                value = int(numbers[0])
+
+                if re.search(r'repl|comment|ответ', aria_label.lower()):
+                    stats["replies"] = value
+                    debug_print(f"МЕТОД 2: Извлечено replies: {value}") # Используем debug_print
+                elif re.search(r'retweet|ретвит|repost', aria_label.lower()):
+                    stats["retweets"] = value
+                    debug_print(f"МЕТОД 2: Извлечено retweets: {value}") # Используем debug_print
+                elif re.search(r'like|нрав|лайк', aria_label.lower()):
+                    stats["likes"] = value
+                    debug_print(f"МЕТОД 2: Извлечено likes: {value}") # Используем debug_print
             except Exception as e:
-                 if not isinstance(e, NoSuchElementException): logger.warning(f"Ошибка обработки кнопки статистики: {e}")
-    except NoSuchElementException: logger.debug("Контейнер кнопок статистики не найден.")
-    except Exception as e: logger.error(f"Общая ошибка при поиске/обработке статистики: {e}")
+                debug_print(f"Ошибка при обработке кнопки: {e}") # Используем debug_print
+    except Exception as e:
+        debug_print(f"Ошибка в методе 2: {e}") # Используем debug_print
+
+    # МЕТОД 3: Поиск по порядку расположения кнопок в группе
+    try:
+        groups = tweet_element.find_elements(By.CSS_SELECTOR, 'div[role="group"]')
+        for group in groups:
+            buttons = group.find_elements(By.CSS_SELECTOR, 'div[role="button"]')
+            debug_print(f"Найдено {len(buttons)} кнопок в группе") # Используем debug_print
+
+            for i, button in enumerate(buttons):
+                text_elements = button.find_elements(By.TAG_NAME, 'span')
+                for elem in text_elements:
+                    text = elem.text.strip()
+                    debug_print(f"Текст в кнопке {i}: '{text}'") # Используем debug_print
+
+                    if text and text.isdigit():
+                        value = int(text)
+                        if i == 0 and stats["replies"] == 0:
+                            stats["replies"] = value
+                            debug_print(f"МЕТОД 3: Извлечено replies по позиции: {value}") # Используем debug_print
+                        elif i == 1 and stats["retweets"] == 0:
+                            stats["retweets"] = value
+                            debug_print(f"МЕТОД 3: Извлечено retweets по позиции: {value}") # Используем debug_print
+                        elif i == 2 and stats["likes"] == 0:
+                            stats["likes"] = value
+                            debug_print(f"МЕТОД 3: Извлечено likes по позиции: {value}") # Используем debug_print
+                        break
+    except Exception as e:
+        debug_print(f"Ошибка в методе 3: {e}") # Используем debug_print
+
+    # МЕТОД 4: Изучение всех span-элементов в твите
+    try:
+        all_spans = tweet_element.find_elements(By.TAG_NAME, 'span')
+        number_spans = []
+
+        for span in all_spans:
+            text = span.text.strip()
+            if text and text.isdigit():
+                number_spans.append((span, int(text)))
+                debug_print(f"Найден span с числом: {text}") # Используем debug_print
+
+        if len(number_spans) >= 3 and stats["replies"] == 0:
+            y_positions = []
+            for span, value in number_spans:
+                rect = span.rect
+                y_positions.append((span, value, rect['y']))
+
+            y_positions.sort(key=lambda x: x[2])
+
+            if stats["replies"] == 0:
+                stats["replies"] = y_positions[0][1]
+                debug_print(f"МЕТОД 4: Извлечено replies по Y-позиции: {stats['replies']}") # Используем debug_print
+
+            if stats["retweets"] == 0 and len(y_positions) > 1:
+                stats["retweets"] = y_positions[1][1]
+                debug_print(f"МЕТОД 4: Извлечено retweets по Y-позиции: {stats['retweets']}") # Используем debug_print
+
+            if stats["likes"] == 0 and len(y_positions) > 2:
+                stats["likes"] = y_positions[2][1]
+                debug_print(f"МЕТОД 4: Извлечено likes по Y-позиции: {stats['likes']}") # Используем debug_print
+    except Exception as e:
+        debug_print(f"Ошибка в методе 4: {e}") # Используем debug_print
+
+    debug_print(f"Итоговая статистика твита: {stats}") # Используем debug_print
     return stats

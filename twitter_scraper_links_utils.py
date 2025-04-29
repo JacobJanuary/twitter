@@ -1,279 +1,403 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Модуль для работы с текстом твитов.
+Модуль для работы со ссылками и анализа содержимого твитов.
+(Функционал извлечения ссылок удален)
 Содержит функции для определения обрезанных твитов и получения полного текста.
-РЕФАКТОРИНГ: get_full_tweet_text использует навигацию в той же вкладке.
 """
 
 import os
 import re
 import logging
+# requests и BeautifulSoup больше не нужны
+# import requests
+# from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException, WebDriverException
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+# mysql.connector больше не нужен
+# from mysql.connector import Error
 import time
 
 # Настройка логирования
 logger = logging.getLogger('twitter_scraper.links')
-if not logger.handlers:
-     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Константы
+# LINKS_CACHE_DIR больше не нужен
+# LINKS_CACHE_DIR = "twitter_links_cache"
+# os.makedirs(LINKS_CACHE_DIR, exist_ok=True)
+
+# --- Функция extract_all_links_from_tweet удалена ---
+# def extract_all_links_from_tweet(tweet_element, username, expand_first=True):
+#     """
+#     Улучшенное извлечение всех ссылок из твита (УДАЛЕНО)
+#     """
+#     # ... (код функции удален) ...
+
+# --- Функция save_links_to_db удалена ---
+# def save_links_to_db(connection, tweet_db_id, links):
+#     """
+#     Сохраняет ссылки из твита в базу данных (УДАЛЕНО)
+#     """
+#     # ... (код функции удален) ...
 
 
 def is_tweet_truncated(tweet_element):
     """
-    Улучшенное определение обрезанных твитов (без изменений)
+    Улучшенное определение обрезанных твитов
     """
+    # Эта функция остается, так как она нужна для получения полного текста
     try:
-        # 1. Проверка на наличие кнопки "Show more" / "Показать еще"
-        show_more_selectors_xpath = [
-            './/div[@role="button" and (contains(., "Show more") or contains(., "Показать ещё"))]',
-            './/span[contains(., "Show more") or contains(., "Показать ещё")]'
+        # 1. Проверка по классам и стилям
+        truncated_classes = [
+            'r-1sg46qm',  # Класс для сокращенного текста
+            'r-1iusvr4',  # Контейнер сокращенного текста
+            'r-linkify'  # Содержимое с сокращённой ссылкой
         ]
-        for xpath in show_more_selectors_xpath:
+
+        for class_name in truncated_classes:
+            elements = tweet_element.find_elements(By.CSS_SELECTOR, f'[class*="{class_name}"]')
+            if elements:
+                for elem in elements:
+                    # Проверяем наличие многоточия в тексте элемента
+                    try:
+                        if '…' in elem.text or '...' in elem.text:
+                            logger.info(f"Обнаружен обрезанный твит (класс: {class_name})")
+                            return True
+                    except: # Игнорируем ошибки StaleElementReferenceException
+                        pass
+
+        # 2. Проверка по кнопкам "Show more" / "Показать еще"
+        xpath_indicators = [
+            './/div[@role="button" and (contains(text(), "Show more") or contains(text(), "Показать ещё"))]',
+            './/span[contains(text(), "Show more") or contains(text(), "Показать ещё")]'
+        ]
+
+        for xpath in xpath_indicators:
             try:
-                button = tweet_element.find_element(By.XPATH, xpath)
-                # Дополнительно проверяем, видима ли кнопка, т.к. она может быть в DOM, но скрыта
-                if button.is_displayed():
-                     logger.debug(f"Твит обрезан (найдена видимая кнопка: {xpath})")
-                     return True
-            except (NoSuchElementException, StaleElementReferenceException):
-                continue # Ищем следующий селектор
+                elements = tweet_element.find_elements(By.XPATH, xpath)
+                if elements:
+                    logger.info(f"Обнаружен обрезанный твит (кнопка: {xpath})")
+                    return True
+            except: # Игнорируем ошибки StaleElementReferenceException
+                 pass
 
-        # 2. Проверка на наличие многоточия в конце видимого текста
+        # 3. Проверка по многоточию в конце основного текста твита
         try:
-            # Ищем основной контейнер текста
-            text_element = tweet_element.find_element(By.CSS_SELECTOR, 'div[data-testid="tweetText"]')
-            visible_text = text_element.text.strip()
-            if visible_text.endswith(('…', '...')):
-                 logger.debug("Твит обрезан (видимое многоточие в data-testid='tweetText')")
-                 return True
+            tweet_text_elements = tweet_element.find_elements(By.CSS_SELECTOR, 'div[data-testid="tweetText"], [lang]')
+            for elem in tweet_text_elements:
+                try:
+                    text = elem.text.strip()
+                    if text.endswith('…') or text.endswith('...'):
+                        logger.info("Обнаружен обрезанный твит (многоточие в конце)")
+                        return True
+                except: # Игнорируем ошибки StaleElementReferenceException
+                    pass
+        except:
+            pass
 
-            # Иногда текст разбит на span'ы, проверяем последний видимый span
-            spans = text_element.find_elements(By.XPATH, './/span[not(ancestor::*[@aria-hidden="true"])]') # Ищем видимые span'ы
-            if spans:
-                 last_visible_span_text = ""
-                 for span in reversed(spans): # Идем с конца
-                      try:
-                           if span.is_displayed():
-                                last_visible_span_text = span.text.strip()
-                                break
-                      except StaleElementReferenceException: continue
-                 if last_visible_span_text.endswith(('…', '...')):
-                      logger.debug("Твит обрезан (видимое многоточие в последнем span)")
-                      return True
+        # 4. Проверка URL на параметры (менее надежно, но может помочь)
+        try:
+            for link in tweet_element.find_elements(By.CSS_SELECTOR, 'a[href*="/status/"]'):
+                try:
+                    href = link.get_attribute('href')
+                    if href and ('/status/' in href) and ('s=20' in href or 's=19' in href):
+                        logger.info(f"Обнаружен обрезанный твит (параметр s= в URL)")
+                        return True
+                except: # Игнорируем ошибки StaleElementReferenceException
+                    pass
+        except:
+            pass
 
-        except (NoSuchElementException, StaleElementReferenceException):
-             logger.debug("Не удалось найти элемент текста или span'ы для проверки многоточия.")
-        except Exception as e:
-             logger.warning(f"Ошибка при проверке многоточия: {e}")
-
-
-        # 3. Проверка на наличие специфичных классов, которые часто используются для обрезки
-        # Этот метод менее надежен из-за изменчивости классов Twitter
-        # truncated_classes = ['r-1jkjb', 'r-1pjcn9w', 'r-1bymd8e'] # Примерные классы (НУЖНО ПРОВЕРЯТЬ АКТУАЛЬНОСТЬ)
-        # try:
-        #     for class_name in truncated_classes:
-        #         elements = tweet_element.find_elements(By.CSS_SELECTOR, f'.{class_name}')
-        #         if elements:
-        #             for elem in elements:
-        #                 try:
-        #                     if elem.is_displayed() and ('…' in elem.text or '...' in elem.text):
-        #                         logger.debug(f"Твит обрезан (класс: {class_name})")
-        #                         return True
-        #                 except StaleElementReferenceException: continue
-        # except (NoSuchElementException, StaleElementReferenceException):
-        #     pass
-        # except Exception as e:
-        #      logger.warning(f"Ошибка при проверке классов обрезки: {e}")
-
-        logger.debug("Признаков обрезки твита не найдено.")
         return False
-    except StaleElementReferenceException:
-        logger.warning("Элемент твита устарел во время проверки на обрезку.")
-        return False # Не можем быть уверены
+
     except Exception as e:
-        logger.error(f"Общая ошибка при проверке обрезанности твита: {e}")
-        return False # В случае ошибки считаем, что не обрезан
+        # Логируем только если ошибка не StaleElementReferenceException
+        if "stale element reference" not in str(e).lower():
+             logger.error(f"Ошибка при проверке обрезанности твита: {e}")
+        return False
 
 
-# --- ИЗМЕНЕННАЯ ФУНКЦИЯ ---
-def get_full_tweet_text(driver, tweet_url):
+def get_full_tweet_text(driver, tweet_url, max_attempts=3):
     """
-    Получает полный текст твита, переходя по URL В ТОЙ ЖЕ ВКЛАДКЕ.
-    Возвращает полный текст или пустую строку.
+    Улучшенное получение полного текста твита с надежным методом раскрытия контента
     """
+    # Эта функция остается, так как она нужна для получения полного текста
     full_text = ""
-    current_url = driver.current_url # Запоминаем URL для возврата
-    wait_timeout = 15 # Таймаут ожидания загрузки твита
-    max_attempts_expand = 3 # Попытки кликнуть "Show more"
+    current_window = None
+    opened_new_window = False
 
     try:
+        # Очищаем URL от параметров запроса
         clean_url = tweet_url.split('?')[0].split('#')[0]
-        logger.info(f"Загружаем полную версию твита (в той же вкладке): {clean_url}")
+        logger.info(f"Загружаем полную версию твита: {clean_url}")
 
-        # --- Переход на страницу твита ---
+        current_window = driver.current_window_handle
+
+        # Открываем новую вкладку
+        driver.execute_script("window.open('');")
+        opened_new_window = True
+        time.sleep(1)
+        driver.switch_to.window(driver.window_handles[-1])
+
+        # Загружаем твит напрямую
         driver.get(clean_url)
+        time.sleep(3)  # Даем странице время на первичную загрузку
 
-        # --- Ожидание загрузки твита ---
-        tweet_article_locator = (By.CSS_SELECTOR, 'article[data-testid="tweet"]')
-        text_locator = (By.CSS_SELECTOR, 'div[data-testid="tweetText"]')
+        # Ждем загрузки твита
         try:
-            # Ждем появления и статьи, и текстового блока внутри нее
-            WebDriverWait(driver, wait_timeout).until(
-                EC.all_of(
-                    EC.presence_of_element_located(tweet_article_locator),
-                    EC.presence_of_element_located(text_locator),
-                    EC.url_contains(clean_url.split('/')[-1]) # Убедимся, что URL соответствует твиту
-                )
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.common.exceptions import TimeoutException
+
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, 'article[data-testid="tweet"], div[data-testid="tweetText"]'))
             )
-            logger.debug("Основной элемент твита и текст загружены.")
-            time.sleep(1) # Небольшая пауза для прорисовки
-            tweet_element = driver.find_element(*tweet_article_locator)
-
         except TimeoutException:
-            logger.error(f"Таймаут при загрузке твита {clean_url} для получения полного текста.")
-            # Попытка вернуться назад
+            logger.warning("Таймаут при загрузке твита, пробуем альтернативный селектор")
+            time.sleep(5)
+
+        # Принудительное раскрытие текста
+        for attempt in range(max_attempts):
+             # 1. Попробуем найти и кликнуть по элементам "Show more"
             try:
-                logger.info(f"Возвращаемся на предыдущую страницу: {current_url}")
-                driver.get(current_url)
-                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'article[data-testid="tweet"]')))
-            except Exception as back_err: logger.error(f"Ошибка при возврате на предыдущую страницу: {back_err}")
-            return "" # Возвращаем пустую строку
-        except Exception as e:
-             logger.error(f"Неожиданная ошибка при ожидании твита {clean_url}: {e}")
-             # Попытка вернуться назад
-             try:
-                 logger.info(f"Возвращаемся на предыдущую страницу: {current_url}")
-                 driver.get(current_url)
-                 WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'article[data-testid="tweet"]')))
-             except Exception as back_err: logger.error(f"Ошибка при возврате: {back_err}")
-             return ""
+                show_more_selectors = [
+                    '//div[@role="button" and (contains(., "Show more") or contains(., "Показать ещё"))]',
+                    '//span[contains(., "Show more") or contains(., "Показать ещё")]',
+                    '//div[@data-testid="tweet"]//div[@role="button" and contains(., "more")]',
+                    '//div[contains(@class, "css-1dbjc4n") and contains(., "…")]',
+                    '//div[contains(@class, "r-1sg46qm")]',
+                ]
 
+                clicked_show_more = False
+                for selector in show_more_selectors:
+                    buttons = driver.find_elements(By.XPATH, selector)
+                    if buttons:
+                        for button in buttons:
+                            try:
+                                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                                time.sleep(0.5)
+                                try:
+                                    button.click()
+                                except:
+                                    driver.execute_script("arguments[0].click();", button)
+                                time.sleep(2) # Ожидание после клика
+                                logger.info("Успешно раскрыт твит через кнопку Show more")
+                                clicked_show_more = True
+                                break # Выходим из внутреннего цикла по кнопкам
+                            except Exception as e:
+                                logger.debug(f"Не удалось кликнуть на кнопку: {e}")
+                        if clicked_show_more:
+                            break # Выходим из цикла по селекторам
 
-        # --- Попытки раскрыть текст, если нужно ---
-        initial_text = ""
-        try:
-            initial_text = tweet_element.find_element(*text_locator).text
-            logger.debug(f"Начальный текст твита {clean_url}: {len(initial_text)} символов")
-        except Exception as e: logger.warning(f"Не удалось получить начальный текст твита {clean_url}: {e}")
+            except Exception as e:
+                logger.debug(f"Ошибка при поиске кнопок Show more: {e}")
 
-        full_text = initial_text # Начинаем с того, что есть
+            # 2. Извлекаем текст после попыток раскрытия
+            all_text_elements = []
+            selectors = [
+                'div[data-testid="tweetText"]',
+                'article[data-testid="tweet"] div[lang]',
+                'div[lang][dir="auto"]',
+                'div[role="group"] div[dir="auto"]'
+            ]
 
-        # Проверяем, нужно ли раскрывать (используем ту же функцию is_tweet_truncated)
-        if is_tweet_truncated(tweet_element):
-             logger.info(f"Твит {clean_url} определен как обрезанный, пытаемся раскрыть...")
-             for attempt in range(max_attempts_expand):
-                 logger.debug(f"Попытка раскрытия текста #{attempt + 1}")
-                 clicked_show_more = False
+            for selector in selectors:
+                try:
+                    elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                    all_text_elements.extend(elements)
+                except:
+                    pass # Игнорируем ошибки поиска
+
+            # Собираем весь текст из найденных элементов
+            current_text = ""
+            processed_texts = set() # Для удаления дубликатов
+            for elem in all_text_elements:
                  try:
-                     # Ищем кнопку "Show more" / "Показать еще" ВНУТРИ загруженного твита
-                     show_more_selectors_xpath = [
-                         './/div[@role="button" and (contains(., "Show more") or contains(., "Показать ещё"))]',
-                         './/span[contains(., "Show more") or contains(., "Показать ещё")]'
-                     ]
-                     show_more_button = None
-                     for selector in show_more_selectors_xpath:
-                         try:
-                             button = tweet_element.find_element(By.XPATH, selector)
-                             if button.is_displayed():
-                                 show_more_button = button
-                                 logger.debug(f"Найдена кнопка 'Show more' ({selector})")
-                                 break
-                         except (NoSuchElementException, StaleElementReferenceException): continue
+                    elem_text = elem.text.strip()
+                    # Если текст не пустой и не дублирует существующий
+                    if elem_text and elem_text not in processed_texts:
+                        if current_text:
+                            current_text += " "
+                        current_text += elem_text
+                        processed_texts.add(elem_text)
+                 except:
+                    pass # Игнорируем ошибки получения текста
 
-                     if show_more_button:
-                         try:
-                             # Прокручиваем к кнопке и кликаем
-                             driver.execute_script("arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});", show_more_button)
-                             time.sleep(0.5) # Пауза для завершения прокрутки
-                             clickable_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable(show_more_button))
-                             clickable_button.click()
-                             clicked_show_more = True
-                             logger.info("Кликнули 'Show more'. Ждем обновления текста...")
+            # Проверка наличия многоточия в конце
+            if current_text and not current_text.endswith('…') and not current_text.endswith('...'):
+                if len(current_text) > len(full_text):
+                    full_text = current_text
+                    logger.info(f"Найден полный текст длиной {len(full_text)} символов (Попытка {attempt+1})")
+                break # Полный текст найден
+            elif len(current_text) > len(full_text):
+                full_text = current_text # Сохраняем самый длинный найденный текст
+                logger.info(f"Найден частично раскрытый текст ({len(full_text)} символов), пробуем еще раз")
 
-                             # Ожидание: либо кнопка исчезнет, либо текст изменится
-                             WebDriverWait(driver, 5).until(
-                                 EC.any_of(
-                                     EC.staleness_of(show_more_button),
-                                     lambda d: d.find_element(*text_locator).text != full_text # Ждем изменения текста
-                                 )
-                             )
-                             logger.info("Обновление после клика 'Show more' обнаружено.")
-                             # Обновляем текст после ожидания
-                             full_text = driver.find_element(*text_locator).text
+            # Дополнительно прокручиваем страницу и ждем раскрытия
+            if attempt < max_attempts - 1: # Не делаем на последней попытке
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.1);")
+                time.sleep(1)
+                driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(2)
 
-                         except TimeoutException:
-                             logger.warning("Таймаут ожидания обновления после клика 'Show more'. Текст мог не раскрыться.")
-                             # Пробуем еще раз прочитать текст на всякий случай
-                             try: full_text = driver.find_element(*text_locator).text
-                             except: pass
-                         except StaleElementReferenceException:
-                             logger.info("Кнопка 'Show more' исчезла после клика (ожидаемо).")
-                             # Текст должен был обновиться, читаем его
-                             try: full_text = driver.find_element(*text_locator).text
-                             except: logger.warning("Не удалось прочитать текст после исчезновения кнопки.")
-                         except Exception as click_err:
-                             logger.warning(f"Ошибка при клике/ожидании 'Show more': {click_err}")
-                     else:
-                          logger.debug("Кнопка 'Show more' не найдена на странице твита.")
-                          break # Если кнопки нет, нет смысла пытаться дальше
+        # 3. Извлечение текста через JavaScript (может обойти обрезание)
+        try:
+            js_text = driver.execute_script("""
+                const tweetTextElements = document.querySelectorAll('[data-testid="tweetText"] span, [data-testid="tweetText"] div');
+                let fullText = '';
+                const processed = new Set();
+                for (const element of tweetTextElements) {
+                    // Проверяем, что элемент видим и содержит текст, но не содержит вложенных img/svg
+                    if (element.offsetParent !== null && element.textContent && !element.querySelector('img, svg')) {
+                         const text = element.textContent.trim();
+                         if (text && !processed.has(text)) {
+                            fullText += text + ' ';
+                            processed.add(text);
+                         }
+                    }
+                }
+                return fullText.trim();
+            """)
 
-                 except Exception as e:
-                     logger.warning(f"Ошибка во время попытки раскрытия #{attempt + 1}: {e}")
+            if js_text and len(js_text) > len(full_text):
+                full_text = js_text
+                logger.info(f"Извлечен текст через JavaScript: {len(full_text)} символов")
+        except Exception as e:
+            logger.debug(f"Не удалось извлечь текст через JavaScript: {e}")
 
-                 # Проверяем, раскрылся ли текст после попытки
-                 if not full_text.endswith(('…', '...')):
-                     logger.info(f"Полный текст твита {clean_url} получен после {attempt + 1} попытки.")
-                     break # Выходим из цикла попыток
-                 else:
-                     logger.info(f"Текст все еще обрезан после {attempt + 1} попытки.")
-                     if attempt < max_attempts_expand - 1: time.sleep(1) # Пауза перед следующей попыткой
+        # Закрываем вкладку и возвращаемся
+        driver.close()
+        opened_new_window = False
+        driver.switch_to.window(current_window)
 
+        if not full_text:
+            logger.warning(f"Не удалось извлечь текст твита по URL: {tweet_url}")
         else:
-             logger.info(f"Твит {clean_url} не определен как обрезанный, используем начальный текст.")
+            logger.info(f"Итоговый извлеченный текст: {len(full_text)} символов")
 
+        return full_text
 
-    except WebDriverException as e:
-        logger.error(f"Ошибка WebDriver при получении полного текста ({clean_url}): {e}")
-        # Попытка восстановления
-        try:
-            logger.warning("Попытка восстановить сессию WebDriver переходом на twitter.com")
-            driver.get("https://twitter.com")
-            WebDriverWait(driver, 10).until(EC.url_contains("twitter.com"))
-        except Exception as recovery_err:
-            logger.error(f"Не удалось восстановить сессию WebDriver: {recovery_err}")
-        full_text = "" # Текст не получен
     except Exception as e:
-        logger.error(f"Общая ошибка при получении полного текста твита {clean_url}: {e}")
-        import traceback; logger.error(traceback.format_exc())
-        full_text = "" # Возвращаем пустую строку в случае ошибки
-    finally:
-        # --- Возвращаемся на исходную страницу ---
+        logger.error(f"Ошибка при получении полного текста твита: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # Возвращаемся к основной вкладке в случае ошибки
         try:
-            if driver.current_url != current_url:
-                 logger.info(f"Возвращаемся на предыдущую страницу: {current_url}")
-                 driver.get(current_url)
-                 # Ждем загрузки основного контента (например, первого твита)
-                 WebDriverWait(driver, 15).until(
-                     EC.presence_of_element_located((By.CSS_SELECTOR, 'article[data-testid="tweet"]'))
-                 )
-                 logger.debug("Успешно вернулись на предыдущую страницу.")
-            else:
-                 logger.debug("Уже находимся на исходной странице, возврат не требуется.")
-        except Exception as back_err:
-            logger.error(f"Критическая ошибка при возврате на страницу {current_url}: {back_err}")
-            # Попытка перезагрузить исходную страницу
+            if opened_new_window:
+                driver.close()
+            if current_window:
+                driver.switch_to.window(current_window)
+        except:
+            pass
+
+        return full_text or ""
+
+
+def extract_full_tweet_text_from_html(driver, tweet_url):
+    """
+    Извлекает полный текст твита из HTML страницы (используется как резервный)
+    """
+    # Эта функция остается, так как она нужна для получения полного текста
+    current_window = None
+    opened_new_window = False
+    full_text = ""
+
+    try:
+        current_window = driver.current_window_handle
+        # Открываем новую вкладку
+        driver.execute_script("window.open('');")
+        opened_new_window = True
+        time.sleep(1)
+        driver.switch_to.window(driver.window_handles[-1])
+
+        # Загружаем твит напрямую
+        driver.get(tweet_url)
+        time.sleep(5)  # Увеличенное время ожидания загрузки
+
+        # Вариант 1: Используем продвинутый XPath для поиска всех текстовых элементов внутри твита
+        try:
+            text_parts = []
+            # Находим основные элементы твита с текстом, исключая дочерние элементы с картинками/иконками
+            text_elements = driver.find_elements(By.XPATH,
+                                                 "//article//div[@lang]//span[not(ancestor::a) and not(.//img) and not(.//svg)] | //article//div[@lang]/text()")
+
+            processed_texts = set()
+            for elem in text_elements:
+                 try:
+                    text = elem.text.strip() if hasattr(elem, 'text') else str(elem).strip()
+                    if text and len(text) > 1 and text not in processed_texts:
+                        # Исключаем имена пользователей и хэштеги, если они отдельные элементы
+                        if not (text.startswith('@') or text.startswith('#')):
+                            text_parts.append(text)
+                            processed_texts.add(text)
+                 except:
+                    pass # Игнорируем ошибки
+
+            if text_parts:
+                full_text = ' '.join(text_parts)
+        except Exception as e:
+            logger.warning(f"Ошибка при извлечении текста методом 1 (HTML): {e}")
+
+        # Если первый метод не сработал, пробуем другой
+        if not full_text:
             try:
-                logger.warning(f"Повторная попытка загрузить страницу: {current_url}")
-                driver.get(current_url)
-                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'article[data-testid="tweet"]')))
-            except Exception as retry_err:
-                 logger.critical(f"Не удалось вернуться на страницу {current_url} даже после повторной попытки: {retry_err}.")
+                lang_elements = driver.find_elements(By.CSS_SELECTOR, "[lang][dir='auto']")
+                processed_texts = set()
+                temp_text = ""
+                for elem in lang_elements:
+                    try:
+                        text = elem.text.strip()
+                        if text and text not in processed_texts:
+                             temp_text += text + " "
+                             processed_texts.add(text)
+                    except:
+                        pass # Игнорируем ошибки
+                if len(temp_text.strip()) > len(full_text):
+                    full_text = temp_text.strip()
+            except Exception as e:
+                logger.warning(f"Ошибка при извлечении текста методом 2 (HTML): {e}")
 
+        # Третий метод - используем JavaScript для извлечения текста
+        if not full_text or len(full_text) < 50:
+            try:
+                js_text = driver.execute_script("""
+                    const article = document.querySelector('article[data-testid="tweet"]');
+                    if (!article) return "";
+                    const textElements = article.querySelectorAll('div[lang] > span, div[lang]');
+                    let text = '';
+                    const processed = new Set();
+                    for (const el of textElements) {
+                        if (el.offsetParent !== null && el.textContent && !el.querySelector('img, svg')) {
+                             const currentText = el.textContent.trim();
+                             if (currentText && !processed.has(currentText)) {
+                                text += currentText + ' ';
+                                processed.add(currentText);
+                             }
+                        }
+                    }
+                    return text.trim();
+                """)
 
-    if not full_text: logger.warning(f"Итоговый полный текст для {clean_url} не получен.")
-    else: logger.info(f"Итоговый извлеченный текст для {clean_url}: {len(full_text)} символов")
+                if js_text and len(js_text) > len(full_text):
+                    full_text = js_text
+            except Exception as e:
+                logger.warning(f"Ошибка при извлечении текста через JavaScript (HTML): {e}")
 
-    return full_text or "" # Возвращаем текст или пустую строку
+        # Закрываем вкладку и возвращаемся
+        driver.close()
+        opened_new_window = False
+        driver.switch_to.window(current_window)
+
+        return full_text
+
+    except Exception as e:
+        logger.error(f"Общая ошибка при извлечении текста твита (HTML): {e}")
+        try:
+            if opened_new_window:
+                driver.close()
+            if current_window:
+                driver.switch_to.window(current_window)
+        except:
+            pass
+        return full_text
