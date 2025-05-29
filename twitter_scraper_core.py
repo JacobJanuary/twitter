@@ -154,21 +154,6 @@ def main():
         print(f"Используется профиль Chrome: {CHROME_PROFILE_PATH}")
         logger.info(f"Используется профиль Chrome: {CHROME_PROFILE_PATH}")
 
-    # Подключаемся к базе данных
-    print("\n--- Подключение к MySQL ---")
-    db_connection = deps['initialize_mysql'](MYSQL_CONFIG)
-    if not db_connection:
-        print("ВНИМАНИЕ: Не удалось подключиться к MySQL. Данные не будут сохранены в базу.")
-        logger.warning("Не удалось подключиться к MySQL. Данные не будут сохранены в базу.")
-        answer = input("Хотите продолжить без сохранения в MySQL? (да/нет): ")
-        if answer.lower() not in ['да', 'yes', 'y', 'д']:
-            print("Выход из программы...")
-            logger.info("Пользователь отменил запуск без MySQL. Выход из программы.")
-            return
-    else:
-        print("Успешное подключение к MySQL")
-        logger.info("Успешное подключение к MySQL")
-
     # Параметры для настройки
     HOURS_FILTER = 24  # Фильтр по времени публикации (в часах)
     CACHE_DURATION = 1  # Срок действия кэша (в часах)
@@ -177,33 +162,6 @@ def main():
     EXTRACT_ARTICLES = True  # Извлекать полные статьи из твитов
     EXTRACT_FULL_TWEETS = True  # Извлекать полный текст длинных твитов
     EXTRACT_LINKS = True  # Извлекать все ссылки из твитов
-
-    # Загружаем список аккаунтов из файла
-    accounts_to_track = load_accounts_from_file("influencer_twitter.txt")
-
-    # Если файл не найден или пуст, используем дефолтный список
-    if not accounts_to_track:
-        print("Используем список аккаунтов по умолчанию")
-        logger.info("Используем список аккаунтов по умолчанию")
-        accounts_to_track = [
-            "Defi0xJeff",
-            "elonmusk",
-            "OpenAI"
-        ]
-
-    print(f"\n--- Основные параметры ---")
-    print(f"Период твитов: последние {HOURS_FILTER} часа")
-    print(f"Срок действия кэша: {CACHE_DURATION} час")
-    print(f"Максимальное количество твитов: {MAX_TWEETS}")
-    print(f"Принудительное обновление: {'ДА' if FORCE_REFRESH else 'НЕТ'}")
-    print(f"Извлечение полных статей: {'ДА' if EXTRACT_ARTICLES else 'НЕТ'}")
-    print(f"Извлечение полных твитов: {'ДА' if EXTRACT_FULL_TWEETS else 'НЕТ'}")
-    print(f"Извлечение всех ссылок: {'ДА' if EXTRACT_LINKS else 'НЕТ'}")
-    print(f"Аккаунты для отслеживания: {', '.join('@' + account for account in accounts_to_track)}")
-
-    logger.info(f"Параметры: период={HOURS_FILTER}ч, кэш={CACHE_DURATION}ч, макс.твитов={MAX_TWEETS}, " +
-                f"обновление={FORCE_REFRESH}, статьи={EXTRACT_ARTICLES}, полные твиты={EXTRACT_FULL_TWEETS}, " +
-                f"ссылки={EXTRACT_LINKS}, аккаунтов={len(accounts_to_track)}")
 
     # Инициализируем браузер
     print(f"\n--- Инициализация браузера Chrome ---")
@@ -223,69 +181,124 @@ def main():
         print(f"Результат авторизации: {'УСПЕШНО' if auth_result else 'НЕ УДАЛОСЬ ПОДТВЕРДИТЬ'}")
         logger.info(f"Результат авторизации: {'успешно' if auth_result else 'не подтверждено'}")
 
-        all_results = []
-
-        # Обрабатываем каждый аккаунт
-        for username in accounts_to_track:
-            print(f"\n=== Обработка аккаунта @{username} ===")
-            logger.info(f"Начало обработки аккаунта @{username}")
-
-            # Получаем твиты пользователя
-            user_data = deps['get_tweets_with_selenium'](
-                username,
-                driver,
-                db_connection,
-                max_tweets=MAX_TWEETS,
-                use_cache=True,
-                cache_duration_hours=CACHE_DURATION,
-                time_filter_hours=HOURS_FILTER,
-                force_refresh=FORCE_REFRESH,
-                extract_articles=EXTRACT_ARTICLES,
-                extract_full_tweets=EXTRACT_FULL_TWEETS,
-                extract_links=EXTRACT_LINKS,
-                dependencies=deps,  # Передаем словарь с функциями
-                html_cache_dir=HTML_CACHE_DIR  # Добавляем этот параметр
-            )
-
-            # Проверяем, что результат содержит твиты
-            has_content = (user_data.get("tweets", []))
-            if has_content:
-                all_results.append(user_data)
-                print(f"Найдено {len(user_data['tweets'])} твитов от @{username}")
-                logger.info(f"Найдено {len(user_data['tweets'])} твитов от @{username}")
+        # Начинаем бесконечный цикл
+        while True:
+            # Подключаемся к базе данных
+            print("\n--- Подключение к MySQL ---")
+            db_connection = deps['initialize_mysql'](MYSQL_CONFIG)
+            if not db_connection:
+                print("ВНИМАНИЕ: Не удалось подключиться к MySQL. Данные не будут сохранены в базу.")
+                logger.warning("Не удалось подключиться к MySQL. Данные не будут сохранены в базу.")
+                answer = input("Хотите продолжить без сохранения в MySQL? (да/нет): ")
+                if answer.lower() not in ['да', 'yes', 'y', 'д']:
+                    print("Выход из программы...")
+                    logger.info("Пользователь отменил запуск без MySQL. Выход из программы.")
+                    break
             else:
-                print(f"Нет твитов от @{username} за последние {HOURS_FILTER} часа")
-                logger.info(f"Нет твитов от @{username} за последние {HOURS_FILTER} часа")
+                print("Успешное подключение к MySQL")
+                logger.info("Успешное подключение к MySQL")
 
-            print(f"=== Завершена обработка @{username} ===\n")
-            logger.info(f"Завершена обработка @{username}")
+            # Загружаем список аккаунтов из файла
+            accounts_to_track = load_accounts_from_file("influencer_twitter.txt")
 
-        # Вывод результатов
-        print("\n===== РЕЗУЛЬТАТЫ =====\n")
-        logger.info("Формирование результатов")
+            # Если файл не найден или пуст, используем дефолтный список
+            if not accounts_to_track:
+                print("Используем список аккаунтов по умолчанию")
+                logger.info("Используем список аккаунтов по умолчанию")
+                accounts_to_track = [
+                    "Defi0xJeff",
+                    "elonmusk",
+                    "OpenAI"
+                ]
 
-        if not all_results:
-            print(f"Не найдено твитов за последние {HOURS_FILTER} часа от отслеживаемых аккаунтов.")
-            logger.warning(f"Не найдено твитов за последние {HOURS_FILTER} часа от отслеживаемых аккаунтов.")
-            return
+            print(f"\n--- Основные параметры ---")
+            print(f"Период твитов: последние {HOURS_FILTER} часа")
+            print(f"Срок действия кэша: {CACHE_DURATION} час")
+            print(f"Максимальное количество твитов: {MAX_TWEETS}")
+            print(f"Принудительное обновление: {'ДА' if FORCE_REFRESH else 'НЕТ'}")
+            print(f"Извлечение полных статей: {'ДА' if EXTRACT_ARTICLES else 'НЕТ'}")
+            print(f"Извлечение полных твитов: {'ДА' if EXTRACT_FULL_TWEETS else 'НЕТ'}")
+            print(f"Извлечение всех ссылок: {'ДА' if EXTRACT_LINKS else 'НЕТ'}")
+            print(f"Аккаунты для отслеживания: {', '.join('@' + account for account in accounts_to_track)}")
 
-        # Отображаем результаты
-        deps['display_results_summary'](all_results, HOURS_FILTER, IMAGES_DIR)
+            logger.info(f"Параметры: период={HOURS_FILTER}ч, кэш={CACHE_DURATION}ч, макс.твитов={MAX_TWEETS}, " +
+                        f"обновление={FORCE_REFRESH}, статьи={EXTRACT_ARTICLES}, полные твиты={EXTRACT_FULL_TWEETS}, " +
+                        f"ссылки={EXTRACT_LINKS}, аккаунтов={len(accounts_to_track)}")
 
-        # Генерируем статистику
-        stats = deps['generate_tweet_statistics'](all_results)
+            all_results = []
 
-        # Если есть подключение к БД, получаем статистику базы данных
-        if db_connection:
-            db_stats = deps['generate_database_statistics'](db_connection)
+            # Обрабатываем каждый аккаунт
+            for username in accounts_to_track:
+                print(f"\n=== Обработка аккаунта @{username} ===")
+                logger.info(f"Начало обработки аккаунта @{username}")
 
-            # Выводим статистику базы данных
-            print("\n--- Информация о базе данных ---")
-            for category, count in db_stats.items():
-                print(f"- {category}: {count}")
+                # Получаем твиты пользователя
+                user_data = deps['get_tweets_with_selenium'](
+                    username,
+                    driver,
+                    db_connection,
+                    max_tweets=MAX_TWEETS,
+                    use_cache=True,
+                    cache_duration_hours=CACHE_DURATION,
+                    time_filter_hours=HOURS_FILTER,
+                    force_refresh=FORCE_REFRESH,
+                    extract_articles=EXTRACT_ARTICLES,
+                    extract_full_tweets=EXTRACT_FULL_TWEETS,
+                    extract_links=EXTRACT_LINKS,
+                    dependencies=deps,  # Передаем словарь с функциями
+                    html_cache_dir=HTML_CACHE_DIR  # Добавляем этот параметр
+                )
+
+                # Проверяем, что результат содержит твиты
+                has_content = (user_data.get("tweets", []))
+                if has_content:
+                    all_results.append(user_data)
+                    print(f"Найдено {len(user_data['tweets'])} твитов от @{username}")
+                    logger.info(f"Найдено {len(user_data['tweets'])} твитов от @{username}")
+                else:
+                    print(f"Нет твитов от @{username} за последние {HOURS_FILTER} часа")
+                    logger.info(f"Нет твитов от @{username} за последние {HOURS_FILTER} часа")
+
+                print(f"=== Завершена обработка @{username} ===\n")
+                logger.info(f"Завершена обработка @{username}")
+
+            # Вывод результатов
+            print("\n===== РЕЗУЛЬТАТЫ =====\n")
+            logger.info("Формирование результатов")
+
+            if not all_results:
+                print(f"Не найдено твитов за последние {HOURS_FILTER} часа от отслеживаемых аккаунтов.")
+                logger.warning(f"Не найдено твитов за последние {HOURS_FILTER} часа от отслеживаемых аккаунтов.")
+            else:
+                # Отображаем результаты
+                deps['display_results_summary'](all_results, HOURS_FILTER, IMAGES_DIR)
+
+                # Генерируем статистику
+                stats = deps['generate_tweet_statistics'](all_results)
+
+                # Если есть подключение к БД, получаем статистику базы данных
+                if db_connection:
+                    db_stats = deps['generate_database_statistics'](db_connection)
+
+                    # Выводим статистику базы данных
+                    print("\n--- Информация о базе данных ---")
+                    for category, count in db_stats.items():
+                        print(f"- {category}: {count}")
+
+            # Закрываем соединение с базой данных после каждого цикла
+            if db_connection and hasattr(db_connection, 'is_connected') and db_connection.is_connected():
+                db_connection.close()
+                print("Соединение с базой данных закрыто")
+                logger.info("Соединение с базой данных закрыто")
+
+            print("\n=== ИТЕРАЦИЯ ЗАВЕРШЕНА, НАЧИНАЮ СЛЕДУЮЩУЮ ===")
+            logger.info("Итерация завершена, начинаю следующую")
+            
+            # Небольшая пауза между итерациями
+            time.sleep(5)
 
     finally:
-        # Закрываем браузер и соединение с базой данных
+        # Закрываем браузер при выходе из программы
         print("\n--- Завершение работы ---")
         logger.info("Завершение работы скрапера")
 
