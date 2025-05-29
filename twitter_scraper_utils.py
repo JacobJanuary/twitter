@@ -12,10 +12,12 @@ import json
 import os
 import datetime
 import re
-from bs4 import BeautifulSoup
-import requests
-import hashlib
-import urllib.parse
+# BeautifulSoup и requests больше не нужны для скачивания изображений
+# import requests
+# from bs4 import BeautifulSoup
+# hashlib и urllib.parse больше не нужны для изображений
+# import hashlib
+# import urllib.parse
 import mysql.connector
 from mysql.connector import Error
 
@@ -24,9 +26,10 @@ DEBUG = True
 
 # Директории для хранения данных
 CACHE_DIR = "twitter_cache"
-IMAGES_DIR = "twitter_images"
+# IMAGES_DIR больше не нужен
+# IMAGES_DIR = "twitter_images"
 os.makedirs(CACHE_DIR, exist_ok=True)
-os.makedirs(IMAGES_DIR, exist_ok=True)
+# os.makedirs(IMAGES_DIR, exist_ok=True) # Удалено
 
 
 def debug_print(*args, **kwargs):
@@ -74,22 +77,67 @@ def initialize_mysql(config):
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
             """)
 
-            # Создаем таблицу для изображений
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS images (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                tweet_id INT,
-                image_url VARCHAR(1024),
-                local_path VARCHAR(1024),
-                image_hash VARCHAR(32),
-                FOREIGN KEY (tweet_id) REFERENCES tweets(id) ON DELETE CASCADE,
-                INDEX idx_tweet_id (tweet_id),
-                INDEX idx_image_hash (image_hash)
-            ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-            """)
+            # --- Удалено создание таблиц images, articles, tweet_links, article_links ---
+            # # Создаем таблицу для изображений (УДАЛЕНО)
+            # cursor.execute("""
+            # CREATE TABLE IF NOT EXISTS images (
+            #     id INT AUTO_INCREMENT PRIMARY KEY,
+            #     tweet_id INT,
+            #     image_url VARCHAR(1024),
+            #     local_path VARCHAR(1024),
+            #     image_hash VARCHAR(32),
+            #     FOREIGN KEY (tweet_id) REFERENCES tweets(id) ON DELETE CASCADE,
+            #     INDEX idx_tweet_id (tweet_id),
+            #     INDEX idx_image_hash (image_hash)
+            # ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            # """)
+            #
+            # # Создаем таблицу для статей (УДАЛЕНО)
+            # cursor.execute("""
+            # CREATE TABLE IF NOT EXISTS articles (
+            #     id INT AUTO_INCREMENT PRIMARY KEY,
+            #     tweet_id INT,
+            #     article_url VARCHAR(1024),
+            #     title TEXT,
+            #     author VARCHAR(255),
+            #     published_date VARCHAR(255),
+            #     source_domain VARCHAR(255),
+            #     content LONGTEXT,
+            #     inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            #     FOREIGN KEY (tweet_id) REFERENCES tweets(id) ON DELETE CASCADE,
+            #     INDEX idx_tweet_id (tweet_id),
+            #     INDEX idx_source_domain (source_domain)
+            # ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            # """)
+            #
+            # # Создаем таблицу для ссылок из твитов (УДАЛЕНО)
+            # cursor.execute("""
+            # CREATE TABLE IF NOT EXISTS tweet_links (
+            #     id INT AUTO_INCREMENT PRIMARY KEY,
+            #     tweet_id INT,
+            #     url VARCHAR(1024),
+            #     link_type ENUM('external', 'mention', 'hashtag', 'media'),
+            #     inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            #     FOREIGN KEY (tweet_id) REFERENCES tweets(id) ON DELETE CASCADE,
+            #     INDEX idx_tweet_id (tweet_id),
+            #     INDEX idx_link_type (link_type)
+            # ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            # """)
+            #
+            # # Создаем таблицу для ссылок из статей (УДАЛЕНО)
+            # cursor.execute("""
+            # CREATE TABLE IF NOT EXISTS article_links (
+            #     id INT AUTO_INCREMENT PRIMARY KEY,
+            #     article_id INT,
+            #     url VARCHAR(1024),
+            #     inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            #     FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE,
+            #     INDEX idx_article_id (article_id)
+            # ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+            # """)
 
             connection.commit()
-            debug_print("База данных успешно инициализирована")
+            debug_print("База данных успешно инициализирована (таблицы users, tweets)")
             return connection
 
     except Error as e:
@@ -124,7 +172,7 @@ def save_user_to_db(connection, username, name):
 
 
 def save_tweet_to_db(connection, user_id, tweet_data):
-    """Сохраняет твит в базу данных"""
+    """Сохраняет твит в базу данных (без изображений и ссылок)"""
     try:
         cursor = connection.cursor()
 
@@ -143,7 +191,7 @@ def save_tweet_to_db(connection, user_id, tweet_data):
             tweet_db_id = result[0]
             # Обновляем статистику
             cursor.execute("""
-                UPDATE tweets 
+                UPDATE tweets
                 SET likes = %s, retweets = %s, replies = %s
                 WHERE id = %s
                 """,
@@ -157,7 +205,7 @@ def save_tweet_to_db(connection, user_id, tweet_data):
             created_at_str = created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else None
 
             cursor.execute("""
-                INSERT INTO tweets 
+                INSERT INTO tweets
                 (tweet_id, user_id, tweet_text, created_at, url, likes, retweets, replies, is_retweet, original_author)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
@@ -176,9 +224,10 @@ def save_tweet_to_db(connection, user_id, tweet_data):
 
         connection.commit()
 
-        # Сохраняем изображения
-        for image_path in tweet_data.get("images", []):
-            save_image_to_db(connection, tweet_db_id, image_path)
+        # --- Удалено сохранение изображений ---
+        # # Сохраняем изображения
+        # for image_path in tweet_data.get("images", []):
+        #     save_image_to_db(connection, tweet_db_id, image_path)
 
         return tweet_db_id
 
@@ -186,40 +235,10 @@ def save_tweet_to_db(connection, user_id, tweet_data):
         print(f"Ошибка при сохранении твита: {e}")
         return None
 
-
-def save_image_to_db(connection, tweet_db_id, image_path, image_url=None):
-    """Сохраняет информацию об изображении в базу данных"""
-    try:
-        if not image_path or not os.path.exists(image_path):
-            return None
-
-        cursor = connection.cursor()
-
-        # Получаем хеш файла из имени (оно уже создано на основе хеша URL)
-        image_filename = os.path.basename(image_path)
-        image_hash = os.path.splitext(image_filename)[0]  # Убираем расширение
-
-        # Проверяем, существует ли изображение в базе
-        cursor.execute("SELECT id FROM images WHERE image_hash = %s AND tweet_id = %s",
-                       (image_hash, tweet_db_id))
-        result = cursor.fetchone()
-
-        if not result:
-            # Добавляем новое изображение
-            cursor.execute("""
-                INSERT INTO images (tweet_id, image_url, local_path, image_hash)
-                VALUES (%s, %s, %s, %s)
-                """,
-                           (tweet_db_id, image_url or "", image_path, image_hash))
-
-            connection.commit()
-            return cursor.lastrowid
-
-        return result[0]  # Возвращаем ID существующего изображения
-
-    except Error as e:
-        print(f"Ошибка при сохранении изображения: {e}")
-        return None
+# --- Функция save_image_to_db удалена ---
+# def save_image_to_db(connection, tweet_db_id, image_path, image_url=None):
+#     """Сохраняет информацию об изображении в базу данных"""
+#     # ... (код функции удален) ...
 
 
 def parse_twitter_date(date_str):
@@ -413,143 +432,20 @@ def manual_auth_with_prompt(driver):
         print(f"Ошибка при авторизации: {e}")
         return False
 
+# --- Функция download_image удалена ---
+# def download_image(url, username):
+#     """Скачивает изображение и сохраняет его в папку с изображениями"""
+#     # ... (код функции удален) ...
 
-def download_image(url, username):
-    """Скачивает изображение и сохраняет его в папку с изображениями"""
-    try:
-        if not url or 'http' not in url:
-            print(f"Недопустимый URL изображения: {url}")
-            return None
-
-        # Создаем директорию для каждого пользователя
-        user_image_dir = os.path.join(IMAGES_DIR, username)
-        os.makedirs(user_image_dir, exist_ok=True)
-
-        # Генерируем имя файла на основе URL
-        url_hash = hashlib.md5(url.encode()).hexdigest()
-        extension = os.path.splitext(urllib.parse.urlparse(url).path)[1]
-        if not extension or len(extension) <= 1:
-            extension = '.jpg'  # По умолчанию
-
-        filename = f"{url_hash}{extension}"
-        filepath = os.path.join(user_image_dir, filename)
-
-        # Если файл уже существует, просто возвращаем путь
-        if os.path.exists(filepath):
-            print(f"Изображение уже существует: {filepath}")
-            return filepath
-
-        # Скачиваем изображение
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            'Referer': 'https://twitter.com/'
-        }
-
-        print(f"Скачивание изображения: {url}")
-        response = requests.get(url, headers=headers, stream=True, timeout=30)
-        response.raise_for_status()
-
-        # Проверяем, что это действительно изображение
-        content_type = response.headers.get('Content-Type', '')
-        if not content_type.startswith('image/'):
-            print(f"Получен не-изображения контент типа: {content_type}")
-            return None
-
-        # Сохраняем изображение
-        with open(filepath, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-
-        print(f"Скачано изображение: {filepath}")
-        return filepath
-    except Exception as e:
-        print(f"Ошибка при скачивании изображения {url}: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-
-def extract_images_from_tweet(tweet_element, username):
-    """Извлекает изображения из твита и скачивает их"""
-    image_paths = []
-
-    try:
-        # Метод 1: Стандартный селектор для изображений
-        img_elements = tweet_element.find_elements(By.CSS_SELECTOR, 'img[alt="Image"]')
-        print(f"Найдено {len(img_elements)} изображений через стандартный селектор")
-
-        # Метод 2: Альтернативный селектор для медиа-контента
-        if not img_elements:
-            print("Пробуем альтернативный метод поиска изображений...")
-            media_elements = tweet_element.find_elements(By.CSS_SELECTOR,
-                                                         'div[data-testid="tweetPhoto"], div[aria-label="Image"]')
-            for media in media_elements:
-                # Ищем все img внутри
-                img_elements.extend(media.find_elements(By.TAG_NAME, 'img'))
-            print(f"Найдено {len(img_elements)} изображений через альтернативные селекторы")
-
-        # Метод 3: Поиск по аттрибутам src, содержащим pbs.twimg.com/media
-        if not img_elements:
-            print("Пробуем поиск по атрибуту src...")
-            all_images = tweet_element.find_elements(By.TAG_NAME, 'img')
-            img_elements = [img for img in all_images if
-                            img.get_attribute('src') and 'pbs.twimg.com/media' in img.get_attribute('src')]
-            print(f"Найдено {len(img_elements)} изображений по атрибуту src")
-
-        # Обработка найденных изображений
-        for img in img_elements:
-            try:
-                src = img.get_attribute('src')
-
-                # Проверяем, является ли это настоящим изображением, а не заглушкой
-                if src and ('https://' in src) and (
-                        'pbs.twimg.com/media' in src or
-                        'pbs.twimg.com/card_img' in src or
-                        'pbs.twimg.com/ext_tw_video_thumb' in src
-                ):
-                    # Получаем изображение в максимальном качестве (заменяем параметры в URL)
-                    original_src = src
-
-                    # Заменяем параметры для получения оригинального изображения
-                    if '?format=' in src:
-                        base_url = src.split('?')[0]
-                        src = f"{base_url}?format=jpg&name=orig"
-
-                    # Еще один вариант: название формата в URL
-                    if 'format=jpg' not in src and 'format=png' not in src and 'format=webp' not in src:
-                        # Если URL уже содержит параметры
-                        if '?' in src:
-                            src = f"{src}&format=jpg&name=orig"
-                        else:
-                            src = f"{src}?format=jpg&name=orig"
-
-                    print(f"Обрабатываем изображение: {src}")
-
-                    # Скачиваем изображение и получаем путь
-                    image_path = download_image(src, username)
-                    if image_path:
-                        image_paths.append(image_path)
-                        print(f"Успешно сохранено изображение: {image_path}")
-                    else:
-                        # Если не удалось скачать оригинал, пробуем исходный URL
-                        if original_src != src:
-                            print(f"Пробуем скачать по исходному URL: {original_src}")
-                            image_path = download_image(original_src, username)
-                            if image_path:
-                                image_paths.append(image_path)
-                                print(f"Успешно сохранено изображение по исходному URL: {image_path}")
-            except Exception as e:
-                print(f"Ошибка при извлечении отдельного изображения: {e}")
-    except Exception as e:
-        print(f"Ошибка при извлечении изображений: {e}")
-
-    print(f"Всего извлечено изображений: {len(image_paths)}")
-    return image_paths
+# --- Функция extract_images_from_tweet удалена ---
+# def extract_images_from_tweet(tweet_element, username):
+#     """Извлекает изображения из твита и скачивает их"""
+#     # ... (код функции удален) ...
 
 
 def extract_retweet_info(tweet_element):
     """Улучшенная функция для извлечения информации о ретвите"""
+    # Эта функция остается, так как она не связана с изображениями/ссылками/статьями
     result = {
         "is_retweet": False,
         "original_author": None
@@ -557,48 +453,42 @@ def extract_retweet_info(tweet_element):
 
     try:
         # Помечаем начало проверки для отладки
-        print("Начало проверки на ретвит...")
+        debug_print("Начало проверки на ретвит...") # Используем debug_print
 
         # МЕТОД 1: Проверка по специфическим тегам для ретвитов
-        # Перечень всех возможных индикаторов ретвита на разных языках и в разных UI
         retweet_indicators = [
             "retweeted", "reposted", "ретвитнул", "ретвитнула",
             "повторно опубликовал", "повторно опубликовала",
             "quote", "цитирует", "отметил", "отметила"
         ]
 
-        # Проверяем в HTML страницы наличие индикаторов ретвита
         try:
-            # Прямой поиск по data-testid="socialContext"
             social_context = tweet_element.find_elements(By.CSS_SELECTOR, '[data-testid="socialContext"]')
             if social_context:
                 context_text = social_context[0].text.lower()
-                print(f"Найден socialContext: '{context_text}'")
+                debug_print(f"Найден socialContext: '{context_text}'") # Используем debug_print
 
-                # Проверяем наличие индикаторов ретвита в тексте
                 for indicator in retweet_indicators:
                     if indicator.lower() in context_text:
-                        print(f"Найден индикатор ретвита: '{indicator}'")
+                        debug_print(f"Найден индикатор ретвита: '{indicator}'") # Используем debug_print
                         result["is_retweet"] = True
                         break
         except Exception as e:
-            print(f"Ошибка при проверке socialContext: {e}")
+            debug_print(f"Ошибка при проверке socialContext: {e}") # Используем debug_print
 
         # МЕТОД 2: Поиск иконки ретвита
         if not result["is_retweet"]:
             try:
-                # Ищем стандартную иконку ретвита
                 retweet_icon = tweet_element.find_elements(By.CSS_SELECTOR, '[data-testid="socialContext"] svg')
                 if retweet_icon:
-                    print("Найдена иконка в socialContext")
+                    debug_print("Найдена иконка в socialContext") # Используем debug_print
                     result["is_retweet"] = True
             except Exception as e:
-                print(f"Ошибка при поиске иконки ретвита: {e}")
+                debug_print(f"Ошибка при поиске иконки ретвита: {e}") # Используем debug_print
 
         # МЕТОД 3: Проверка на наличие двух разных имен пользователей в твите
         if not result["is_retweet"]:
             try:
-                # В ретвите обычно присутствуют имена двух пользователей
                 user_links = tweet_element.find_elements(By.CSS_SELECTOR, 'a[role="link"][href*="/"]')
                 usernames = set()
 
@@ -609,12 +499,12 @@ def extract_retweet_info(tweet_element):
                         if username and len(username) > 1:
                             usernames.add(username)
 
-                print(f"Найдено уникальных имен пользователей: {len(usernames)}")
+                debug_print(f"Найдено уникальных имен пользователей: {len(usernames)}") # Используем debug_print
                 if len(usernames) >= 2:
-                    print("Обнаружено несколько имен пользователей, возможно это ретвит")
+                    debug_print("Обнаружено несколько имен пользователей, возможно это ретвит") # Используем debug_print
                     result["is_retweet"] = True
             except Exception as e:
-                print(f"Ошибка при проверке нескольких имен пользователей: {e}")
+                debug_print(f"Ошибка при проверке нескольких имен пользователей: {e}") # Используем debug_print
 
         # Если определили, что это ретвит, ищем оригинального автора
         if result["is_retweet"]:
@@ -626,7 +516,7 @@ def extract_retweet_info(tweet_element):
                         href = link.get_attribute('href')
                         if href and '/status/' not in href:
                             original_author = href.split('/')[-1]
-                            print(f"Найден оригинальный автор через socialContext: {original_author}")
+                            debug_print(f"Найден оригинальный автор через socialContext: {original_author}") # Используем debug_print
                             result["original_author"] = original_author
                             break
 
@@ -635,11 +525,10 @@ def extract_retweet_info(tweet_element):
                     user_name_elements = tweet_element.find_elements(By.CSS_SELECTOR,
                                                                      '[data-testid="User-Name"] a[role="link"]')
                     if len(user_name_elements) >= 2:
-                        # Берем второй элемент - обычно это оригинальный автор
                         href = user_name_elements[1].get_attribute('href')
                         if href and '/status/' not in href:
                             original_author = href.split('/')[-1]
-                            print(f"Найден оригинальный автор через User-Name: {original_author}")
+                            debug_print(f"Найден оригинальный автор через User-Name: {original_author}") # Используем debug_print
                             result["original_author"] = original_author
 
                 # МЕТОД 3: Поиск имен пользователей в порядке появления
@@ -654,86 +543,78 @@ def extract_retweet_info(tweet_element):
                             if username and len(username) > 1 and username not in usernames:
                                 usernames.append(username)
 
-                    print(f"Найдено имен пользователей в порядке: {usernames}")
-                    # Второе имя обычно оригинальный автор
+                    debug_print(f"Найдено имен пользователей в порядке: {usernames}") # Используем debug_print
                     if len(usernames) >= 2:
                         result["original_author"] = usernames[1]
-                        print(f"Использовано второе имя как оригинальный автор: {result['original_author']}")
+                        debug_print(f"Использовано второе имя как оригинальный автор: {result['original_author']}") # Используем debug_print
             except Exception as e:
-                print(f"Ошибка при поиске оригинального автора: {e}")
+                debug_print(f"Ошибка при поиске оригинального автора: {e}") # Используем debug_print
 
-        print(f"Результат определения ретвита: {result}")
+        debug_print(f"Результат определения ретвита: {result}") # Используем debug_print
         return result
 
     except Exception as e:
-        print(f"Общая ошибка при определении ретвита: {e}")
+        debug_print(f"Общая ошибка при определении ретвита: {e}") # Используем debug_print
         return result
 
 
 def extract_tweet_stats(tweet_element):
     """Извлекает статистику твита (лайки, ретвиты, ответы)"""
+    # Эта функция остается, так как она не связана с изображениями/ссылками/статьями
     stats = {"likes": 0, "retweets": 0, "replies": 0}
 
     # МЕТОД 0: "Старая надежная" техника извлечения replies
     try:
-        # Этот метод раньше работал для replies
         reply_elements = tweet_element.find_elements(By.CSS_SELECTOR, 'div[data-testid="reply"]')
-        print(f"Найдено элементов reply: {len(reply_elements)}")
+        debug_print(f"Найдено элементов reply: {len(reply_elements)}") # Используем debug_print
 
         for reply_el in reply_elements:
             all_text = reply_el.text
-            print(f"Текст элемента reply: '{all_text}'")
+            debug_print(f"Текст элемента reply: '{all_text}'") # Используем debug_print
 
-            # Ищем цифры в тексте
             numbers = re.findall(r'\d+', all_text)
             if numbers:
                 stats["replies"] = int(numbers[0])
-                print(f"МЕТОД 0: Извлечено replies: {stats['replies']}")
+                debug_print(f"МЕТОД 0: Извлечено replies: {stats['replies']}") # Используем debug_print
     except Exception as e:
-        print(f"Ошибка в методе 0: {e}")
+        debug_print(f"Ошибка в методе 0: {e}") # Используем debug_print
 
-    # МЕТОД 1: Прямой поиск по data-testid с более тщательным извлечением
+    # МЕТОД 1: Прямой поиск по data-testid
     for stat_type, stat_key in [("reply", "replies"), ("retweet", "retweets"), ("like", "likes")]:
         try:
-            # Находим элементы по data-testid
             selector = f'div[data-testid="{stat_type}"]'
             elements = tweet_element.find_elements(By.CSS_SELECTOR, selector)
-            print(f"Найдено {len(elements)} элементов с селектором '{selector}'")
+            debug_print(f"Найдено {len(elements)} элементов с селектором '{selector}'") # Используем debug_print
 
             for element in elements:
-                # Получаем весь текст элемента
                 full_text = element.text
-                print(f"Текст элемента {stat_type}: '{full_text}'")
+                debug_print(f"Текст элемента {stat_type}: '{full_text}'") # Используем debug_print
 
-                # Ищем числа в тексте
                 if full_text:
-                    # Сначала пробуем найти отдельные числа
                     numbers = re.findall(r'(\d+)', full_text)
                     if numbers:
                         value = int(numbers[0])
                         stats[stat_key] = value
-                        print(f"МЕТОД 1: Извлечено {stat_key}: {value}")
+                        debug_print(f"МЕТОД 1: Извлечено {stat_key}: {value}") # Используем debug_print
                         continue
 
-                # Если не нашли числа в тексте, ищем в span-элементах
                 spans = element.find_elements(By.TAG_NAME, 'span')
                 for span in spans:
                     text = span.text.strip()
                     if text and re.search(r'\d', text):
-                        # Ищем любые числа
                         numbers = re.findall(r'(\d+)', text)
                         if numbers:
                             value = int(numbers[0])
                             stats[stat_key] = value
-                            print(f"МЕТОД 1 (spans): Извлечено {stat_key}: {value}")
+                            debug_print(f"МЕТОД 1 (spans): Извлечено {stat_key}: {value}") # Используем debug_print
                             break
         except Exception as e:
-            print(f"Ошибка при извлечении {stat_type}: {e}")
+            debug_print(f"Ошибка при извлечении {stat_type}: {e}") # Используем debug_print
 
-    # МЕТОД 2: Поиск в aria-label, который лучше работает для чисел
+    # МЕТОД 2: Поиск в aria-label
     try:
         buttons = tweet_element.find_elements(By.CSS_SELECTOR, 'div[role="button"][aria-label]')
-        print(f"Найдено {len(buttons)} кнопок с aria-label")
+        debug_print(f"Найдено {len(buttons)} кнопок с aria-label") # Используем debug_print
 
         for button in buttons:
             try:
@@ -741,64 +622,58 @@ def extract_tweet_stats(tweet_element):
                 if not aria_label:
                     continue
 
-                print(f"Проверяем aria-label: '{aria_label}'")
+                debug_print(f"Проверяем aria-label: '{aria_label}'") # Используем debug_print
 
-                # Ищем числа в aria-label
                 numbers = re.findall(r'(\d+)', aria_label)
                 if not numbers:
                     continue
 
                 value = int(numbers[0])
 
-                # Определяем тип статистики по ключевым словам
                 if re.search(r'repl|comment|ответ', aria_label.lower()):
                     stats["replies"] = value
-                    print(f"МЕТОД 2: Извлечено replies: {value}")
+                    debug_print(f"МЕТОД 2: Извлечено replies: {value}") # Используем debug_print
                 elif re.search(r'retweet|ретвит|repost', aria_label.lower()):
                     stats["retweets"] = value
-                    print(f"МЕТОД 2: Извлечено retweets: {value}")
+                    debug_print(f"МЕТОД 2: Извлечено retweets: {value}") # Используем debug_print
                 elif re.search(r'like|нрав|лайк', aria_label.lower()):
                     stats["likes"] = value
-                    print(f"МЕТОД 2: Извлечено likes: {value}")
+                    debug_print(f"МЕТОД 2: Извлечено likes: {value}") # Используем debug_print
             except Exception as e:
-                print(f"Ошибка при обработке кнопки: {e}")
+                debug_print(f"Ошибка при обработке кнопки: {e}") # Используем debug_print
     except Exception as e:
-        print(f"Ошибка в методе 2: {e}")
+        debug_print(f"Ошибка в методе 2: {e}") # Используем debug_print
 
     # МЕТОД 3: Поиск по порядку расположения кнопок в группе
     try:
         groups = tweet_element.find_elements(By.CSS_SELECTOR, 'div[role="group"]')
         for group in groups:
             buttons = group.find_elements(By.CSS_SELECTOR, 'div[role="button"]')
-            print(f"Найдено {len(buttons)} кнопок в группе")
+            debug_print(f"Найдено {len(buttons)} кнопок в группе") # Используем debug_print
 
-            # Обычно порядок: replies, retweets, likes
             for i, button in enumerate(buttons):
-                # Получаем все число-подобные тексты в кнопке
                 text_elements = button.find_elements(By.TAG_NAME, 'span')
                 for elem in text_elements:
                     text = elem.text.strip()
-                    print(f"Текст в кнопке {i}: '{text}'")
+                    debug_print(f"Текст в кнопке {i}: '{text}'") # Используем debug_print
 
-                    # Проверяем, содержит ли текст только цифры
                     if text and text.isdigit():
                         value = int(text)
                         if i == 0 and stats["replies"] == 0:
                             stats["replies"] = value
-                            print(f"МЕТОД 3: Извлечено replies по позиции: {value}")
+                            debug_print(f"МЕТОД 3: Извлечено replies по позиции: {value}") # Используем debug_print
                         elif i == 1 and stats["retweets"] == 0:
                             stats["retweets"] = value
-                            print(f"МЕТОД 3: Извлечено retweets по позиции: {value}")
+                            debug_print(f"МЕТОД 3: Извлечено retweets по позиции: {value}") # Используем debug_print
                         elif i == 2 and stats["likes"] == 0:
                             stats["likes"] = value
-                            print(f"МЕТОД 3: Извлечено likes по позиции: {value}")
+                            debug_print(f"МЕТОД 3: Извлечено likes по позиции: {value}") # Используем debug_print
                         break
     except Exception as e:
-        print(f"Ошибка в методе 3: {e}")
+        debug_print(f"Ошибка в методе 3: {e}") # Используем debug_print
 
     # МЕТОД 4: Изучение всех span-элементов в твите
     try:
-        # Напрямую ищем spans, содержащие только числа
         all_spans = tweet_element.find_elements(By.TAG_NAME, 'span')
         number_spans = []
 
@@ -806,11 +681,9 @@ def extract_tweet_stats(tweet_element):
             text = span.text.strip()
             if text and text.isdigit():
                 number_spans.append((span, int(text)))
-                print(f"Найден span с числом: {text}")
+                debug_print(f"Найден span с числом: {text}") # Используем debug_print
 
-        # Если нашли 3 числа, предполагаем это replies, retweets, likes
         if len(number_spans) >= 3 and stats["replies"] == 0:
-            # Сортируем по положению на странице (сверху вниз)
             y_positions = []
             for span, value in number_spans:
                 rect = span.rect
@@ -818,20 +691,19 @@ def extract_tweet_stats(tweet_element):
 
             y_positions.sort(key=lambda x: x[2])
 
-            # Берем первые три элемента и присваиваем значения
             if stats["replies"] == 0:
                 stats["replies"] = y_positions[0][1]
-                print(f"МЕТОД 4: Извлечено replies по Y-позиции: {stats['replies']}")
+                debug_print(f"МЕТОД 4: Извлечено replies по Y-позиции: {stats['replies']}") # Используем debug_print
 
             if stats["retweets"] == 0 and len(y_positions) > 1:
                 stats["retweets"] = y_positions[1][1]
-                print(f"МЕТОД 4: Извлечено retweets по Y-позиции: {stats['retweets']}")
+                debug_print(f"МЕТОД 4: Извлечено retweets по Y-позиции: {stats['retweets']}") # Используем debug_print
 
             if stats["likes"] == 0 and len(y_positions) > 2:
                 stats["likes"] = y_positions[2][1]
-                print(f"МЕТОД 4: Извлечено likes по Y-позиции: {stats['likes']}")
+                debug_print(f"МЕТОД 4: Извлечено likes по Y-позиции: {stats['likes']}") # Используем debug_print
     except Exception as e:
-        print(f"Ошибка в методе 4: {e}")
+        debug_print(f"Ошибка в методе 4: {e}") # Используем debug_print
 
-    print(f"Итоговая статистика твита: {stats}")
+    debug_print(f"Итоговая статистика твита: {stats}") # Используем debug_print
     return stats
